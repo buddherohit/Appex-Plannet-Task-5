@@ -1,251 +1,163 @@
 <?php
-// backend/api/courses.php
-
-require_once '../config/database.php';
-require_once '../config/helpers.php';
-
-$database = new Database();
-$db = $database->getConnection();
+require_once __DIR__ . '/../helpers/api_bootstrap.php';
 
 $method = $_SERVER['REQUEST_METHOD'];
-$action = isset($_GET['action']) ? $_GET['action'] : '';
+$data = json_decode(file_get_contents("php://input"), true);
 
-// 1. READ (GET method is public/student authorized)
-if ($method === 'GET') {
-    $courseId = isset($_GET['id']) ? intval($_GET['id']) : 0;
+switch ($method) {
+    case 'GET':
+        // Fetch courses (Student & Admin)
+        $search = isset($_GET['search']) ? '%' . trim($_GET['search']) . '%' : null;
+        $category = isset($_GET['category']) ? trim($_GET['category']) : null;
+        
+        $query = "SELECT * FROM courses WHERE 1=1";
+        $params = [];
 
-    if ($courseId > 0) {
-        // Fetch single course
-        try {
-            $stmt = $db->prepare("SELECT * FROM courses WHERE id = :id LIMIT 1");
-            $stmt->execute([':id' => $courseId]);
-            $course = $stmt->fetch();
-            if ($course) {
-                jsonResponse(true, "Course details retrieved.", $course);
-            } else {
-                jsonResponse(false, "Course not found.", null, 404);
-            }
-        } catch (PDOException $e) {
-            jsonResponse(false, "Error fetching course: " . $e->getMessage(), null, 500);
+        if ($search) {
+            $query .= " AND (title LIKE :search OR description LIKE :search OR instructor LIKE :search)";
+            $params[':search'] = $search;
         }
-    } else {
-        // Fetch paginated list
-        $search = isset($_GET['search']) ? sanitize($_GET['search']) : '';
-        $category = isset($_GET['category']) ? sanitize($_GET['category']) : '';
-        $page = isset($_GET['page']) ? intval($_GET['page']) : 1;
-        if ($page < 1) $page = 1;
-        $limit = 10;
-        $offset = ($page - 1) * $limit;
+
+        if ($category && $category !== 'All') {
+            $query .= " AND category = :category";
+            $params[':category'] = $category;
+        }
+
+        $query .= " ORDER BY created_at DESC";
 
         try {
-            // Build query dynamically
-            $whereClauses = [];
-            $params = [];
-
-            if (!empty($search)) {
-                $whereClauses[] = "(title LIKE :search OR description LIKE :search)";
-                $params[':search'] = "%" . $search . "%";
-            }
-            if (!empty($category)) {
-                $whereClauses[] = "category = :category";
-                $params[':category'] = $category;
-            }
-
-            $whereSql = "";
-            if (count($whereClauses) > 0) {
-                $whereSql = "WHERE " . implode(" AND ", $whereClauses);
-            }
-
-            // Total count query
-            $countStmt = $db->prepare("SELECT COUNT(*) as total FROM courses $whereSql");
-            $countStmt->execute($params);
-            $totalCount = intval($countStmt->fetch()['total']);
-
-            // Fetch records query
-            $stmt = $db->prepare("SELECT * FROM courses $whereSql ORDER BY created_at DESC LIMIT $limit OFFSET $offset");
+            $stmt = $db->prepare($query);
             $stmt->execute($params);
             $courses = $stmt->fetchAll();
+            echo json_encode(["success" => true, "courses" => $courses]);
+        } catch (Exception $e) {
+            http_response_code(500);
+            echo json_encode(["success" => false, "message" => "Database error: " . $e->getMessage()]);
+        }
+        break;
 
-            // Fetch list of distinct categories for filters
-            $catStmt = $db->prepare("SELECT DISTINCT category FROM courses WHERE category IS NOT NULL AND category != ''");
-            $catStmt->execute();
-            $categories = array_column($catStmt->fetchAll(), 'category');
+    case 'POST':
+        // Create course (Admin only)
+        $currentUser = JWTHelper::requireAdmin();
+        
+        if (!isset($data['title']) || !isset($data['description']) || !isset($data['instructor']) || !isset($data['duration']) || !isset($data['category'])) {
+            http_response_code(400);
+            echo json_encode(["success" => false, "message" => "Missing required fields."]);
+            break;
+        }
 
-            jsonResponse(true, "Courses retrieved successfully.", [
-                "courses" => $courses,
-                "categories" => $categories,
-                "pagination" => [
-                    "total_records" => $totalCount,
-                    "total_pages" => ceil($totalCount / $limit),
-                    "current_page" => $page,
-                    "limit" => $limit
-                ]
+        $title = trim($data['title']);
+        $description = trim($data['description']);
+        $instructor = trim($data['instructor']);
+        $duration = trim($data['duration']);
+        $category = trim($data['category']);
+        $image_url = isset($data['image_url']) ? trim($data['image_url']) : null;
+
+        try {
+            $stmt = $db->prepare("INSERT INTO courses (title, description, instructor, duration, category, image_url) VALUES (:title, :description, :instructor, :duration, :category, :image_url)");
+            $stmt->execute([
+                ':title' => $title,
+                ':description' => $description,
+                ':instructor' => $instructor,
+                ':duration' => $duration,
+                ':category' => $category,
+                ':image_url' => $image_url
             ]);
-        } catch (PDOException $e) {
-            jsonResponse(false, "Error fetching courses list: " . $e->getMessage(), null, 500);
+            $courseId = $db->lastInsertId();
+
+            logActivity($db, $currentUser['id'], "Created Course", "Created course: $title");
+            addNotification($db, null, "general", "New Course Available: '$title' by $instructor.");
+
+            echo json_encode(["success" => true, "message" => "Course created successfully.", "id" => $courseId]);
+        } catch (Exception $e) {
+            http_response_code(500);
+            echo json_encode(["success" => false, "message" => "Database error: " . $e->getMessage()]);
         }
-    }
-}
+        break;
 
-// 2. WRITE/UPDATE/DELETE (Requires Admin privileges)
-$user = authenticate($db, 'admin');
+    case 'PUT':
+        // Update course (Admin only)
+        $currentUser = JWTHelper::requireAdmin();
+        $id = isset($_GET['id']) ? intval($_GET['id']) : 0;
 
-if ($method === 'POST') {
-    // Determine if we are creating or updating (via POST method with _method override or action query param)
-    if ($action === 'update' || isset($_POST['_method']) && $_POST['_method'] === 'PUT') {
-        updateCourse($db, $user);
-    } else {
-        createCourse($db, $user);
-    }
-} else if ($method === 'DELETE') {
-    deleteCourse($db, $user);
-} else {
-    jsonResponse(false, "Method not allowed.", null, 405);
-}
-
-// CREATE COURSE
-function createCourse($db, $user) {
-    // Support multipart form data for file upload
-    $title = isset($_POST['title']) ? sanitize($_POST['title']) : '';
-    $description = isset($_POST['description']) ? sanitize($_POST['description']) : '';
-    $category = isset($_POST['category']) ? sanitize($_POST['category']) : '';
-    $thumbnailUrl = '';
-
-    if (empty($title) || empty($description) || empty($category)) {
-        jsonResponse(false, "Title, description, and category are required fields.", null, 400);
-    }
-
-    // Process file upload if provided
-    if (isset($_FILES['thumbnail']) && $_FILES['thumbnail']['error'] === UPLOAD_ERR_OK) {
-        $thumbnailUrl = handleImageUpload($_FILES['thumbnail']);
-    }
-
-    try {
-        $stmt = $db->prepare("
-            INSERT INTO courses (title, description, thumbnail, category) 
-            VALUES (:title, :description, :thumbnail, :category)
-        ");
-        $stmt->execute([
-            ':title' => $title,
-            ':description' => $description,
-            ':thumbnail' => $thumbnailUrl,
-            ':category' => $category
-        ]);
-
-        $newCourseId = $db->lastInsertId();
-        logActivity($db, $user['id'], "Admin created course: " . $title);
-
-        jsonResponse(true, "Course created successfully.", ["course_id" => $newCourseId], 201);
-    } catch (PDOException $e) {
-        jsonResponse(false, "Failed to create course: " . $e->getMessage(), null, 500);
-    }
-}
-
-// UPDATE COURSE
-function updateCourse($db, $user) {
-    $courseId = isset($_POST['id']) ? intval($_POST['id']) : 0;
-    if ($courseId <= 0) {
-        jsonResponse(false, "Invalid course ID for update.", null, 400);
-    }
-
-    $title = isset($_POST['title']) ? sanitize($_POST['title']) : '';
-    $description = isset($_POST['description']) ? sanitize($_POST['description']) : '';
-    $category = isset($_POST['category']) ? sanitize($_POST['category']) : '';
-
-    if (empty($title) || empty($description) || empty($category)) {
-        jsonResponse(false, "Title, description, and category are required fields.", null, 400);
-    }
-
-    try {
-        // Fetch current course
-        $stmt = $db->prepare("SELECT thumbnail FROM courses WHERE id = :id LIMIT 1");
-        $stmt->execute([':id' => $courseId]);
-        $course = $stmt->fetch();
-        if (!$course) {
-            jsonResponse(false, "Course not found.", null, 404);
+        if ($id <= 0) {
+            http_response_code(400);
+            echo json_encode(["success" => false, "message" => "Invalid course ID."]);
+            break;
         }
 
-        $thumbnailUrl = $course['thumbnail'];
-
-        // Process file upload if a new thumbnail is provided
-        if (isset($_FILES['thumbnail']) && $_FILES['thumbnail']['error'] === UPLOAD_ERR_OK) {
-            $thumbnailUrl = handleImageUpload($_FILES['thumbnail']);
+        if (!isset($data['title']) || !isset($data['description']) || !isset($data['instructor']) || !isset($data['duration']) || !isset($data['category'])) {
+            http_response_code(400);
+            echo json_encode(["success" => false, "message" => "Missing required fields."]);
+            break;
         }
 
-        $stmt = $db->prepare("
-            UPDATE courses 
-            SET title = :title, description = :description, thumbnail = :thumbnail, category = :category 
-            WHERE id = :id
-        ");
-        $stmt->execute([
-            ':title' => $title,
-            ':description' => $description,
-            ':thumbnail' => $thumbnailUrl,
-            ':category' => $category,
-            ':id' => $courseId
-        ]);
+        $title = trim($data['title']);
+        $description = trim($data['description']);
+        $instructor = trim($data['instructor']);
+        $duration = trim($data['duration']);
+        $category = trim($data['category']);
+        $image_url = isset($data['image_url']) ? trim($data['image_url']) : null;
 
-        logActivity($db, $user['id'], "Admin updated course ID: " . $courseId . " ($title)");
-        jsonResponse(true, "Course updated successfully.");
-    } catch (PDOException $e) {
-        jsonResponse(false, "Failed to update course: " . $e->getMessage(), null, 500);
-    }
-}
+        try {
+            $stmt = $db->prepare("UPDATE courses SET title = :title, description = :description, instructor = :instructor, duration = :duration, category = :category, image_url = :image_url WHERE id = :id");
+            $stmt->execute([
+                ':title' => $title,
+                ':description' => $description,
+                ':instructor' => $instructor,
+                ':duration' => $duration,
+                ':category' => $category,
+                ':image_url' => $image_url,
+                ':id' => $id
+            ]);
 
-// DELETE COURSE
-function deleteCourse($db, $user) {
-    $courseId = isset($_GET['id']) ? intval($_GET['id']) : 0;
-    if ($courseId <= 0) {
-        jsonResponse(false, "Invalid course ID for deletion.", null, 400);
-    }
+            logActivity($db, $currentUser['id'], "Updated Course", "Updated course details for: $title");
 
-    try {
-        // Fetch details to log
-        $stmt = $db->prepare("SELECT title FROM courses WHERE id = :id LIMIT 1");
-        $stmt->execute([':id' => $courseId]);
-        $course = $stmt->fetch();
+            echo json_encode(["success" => true, "message" => "Course updated successfully."]);
+        } catch (Exception $e) {
+            http_response_code(500);
+            echo json_encode(["success" => false, "message" => "Database error: " . $e->getMessage()]);
+        }
+        break;
 
-        if (!$course) {
-            jsonResponse(false, "Course not found.", null, 404);
+    case 'DELETE':
+        // Delete course (Admin only)
+        $currentUser = JWTHelper::requireAdmin();
+        $id = isset($_GET['id']) ? intval($_GET['id']) : 0;
+
+        if ($id <= 0) {
+            http_response_code(400);
+            echo json_encode(["success" => false, "message" => "Invalid course ID."]);
+            break;
         }
 
-        $stmt = $db->prepare("DELETE FROM courses WHERE id = :id");
-        $stmt->execute([':id' => $courseId]);
+        try {
+            // Retrieve course title first for logging
+            $stmt = $db->prepare("SELECT title FROM courses WHERE id = :id");
+            $stmt->execute([':id' => $id]);
+            $course = $stmt->fetch();
 
-        logActivity($db, $user['id'], "Admin deleted course: " . $course['title']);
-        jsonResponse(true, "Course deleted successfully.");
-    } catch (PDOException $e) {
-        jsonResponse(false, "Failed to delete course: " . $e->getMessage(), null, 500);
-    }
-}
+            if (!$course) {
+                http_response_code(404);
+                echo json_encode(["success" => false, "message" => "Course not found."]);
+                break;
+            }
 
-// Helper: Handle Thumbnail image uploads
-function handleImageUpload($file) {
-    $allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
-    $fileType = $file['type'];
-    
-    if (!in_array($fileType, $allowedTypes)) {
-        jsonResponse(false, "Only JPG, PNG, GIF, and WEBP image uploads are permitted for course thumbnails.", null, 400);
-    }
+            $del = $db->prepare("DELETE FROM courses WHERE id = :id");
+            $del->execute([':id' => $id]);
 
-    // Max image size: 2MB for thumbnails
-    if ($file['size'] > 2 * 1024 * 1024) {
-        jsonResponse(false, "Course thumbnail image must be smaller than 2MB.", null, 400);
-    }
+            logActivity($db, $currentUser['id'], "Deleted Course", "Deleted course: " . $course['title']);
 
-    $uploadDir = '../uploads/';
-    if (!is_dir($uploadDir)) {
-        mkdir($uploadDir, 0755, true);
-    }
+            echo json_encode(["success" => true, "message" => "Course deleted successfully."]);
+        } catch (Exception $e) {
+            http_response_code(500);
+            echo json_encode(["success" => false, "message" => "Database error: " . $e->getMessage()]);
+        }
+        break;
 
-    $extension = pathinfo($file['name'], PATHINFO_EXTENSION);
-    $filename = 'thumb_' . bin2hex(random_bytes(8)) . '.' . $extension;
-    $targetPath = $uploadDir . $filename;
-
-    if (move_uploaded_file($file['tmp_name'], $targetPath)) {
-        return 'uploads/' . $filename;
-    } else {
-        jsonResponse(false, "Failed to write course thumbnail to uploads folder.", null, 500);
-    }
+    default:
+        http_response_code(405);
+        echo json_encode(["success" => false, "message" => "Method not allowed."]);
+        break;
 }
 ?>

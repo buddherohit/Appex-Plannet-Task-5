@@ -1,221 +1,124 @@
 <?php
-// backend/api/projects.php
-
-require_once '../config/database.php';
-require_once '../config/helpers.php';
-
-$database = new Database();
-$db = $database->getConnection();
-
-// Authenticate user
-$user = authenticate($db);
+require_once __DIR__ . '/../helpers/api_bootstrap.php';
 
 $method = $_SERVER['REQUEST_METHOD'];
-$input = getJsonInput();
+$data = json_decode(file_get_contents("php://input"), true);
 
-if ($method === 'GET') {
-    $projectId = isset($_GET['id']) ? intval($_GET['id']) : 0;
+switch ($method) {
+    case 'GET':
+        // Retrieve project listings (Requires auth)
+        $currentUser = JWTHelper::requireAuth();
+        
+        $student_id = isset($_GET['student_id']) ? intval($_GET['student_id']) : 0;
+        $search = isset($_GET['search']) ? '%' . trim($_GET['search']) . '%' : null;
 
-    if ($projectId > 0) {
-        // Fetch single project
-        try {
-            $stmt = $db->prepare("
-                SELECT p.*, u.full_name as student_name, u.email as student_email 
-                FROM projects p
-                JOIN users u ON p.user_id = u.id
-                WHERE p.id = :id LIMIT 1
-            ");
-            $stmt->execute([':id' => $projectId]);
-            $project = $stmt->fetch();
-            if ($project) {
-                jsonResponse(true, "Project retrieved.", $project);
-            } else {
-                jsonResponse(false, "Project not found.", null, 404);
-            }
-        } catch (PDOException $e) {
-            jsonResponse(false, "Error fetching project: " . $e->getMessage(), null, 500);
+        $query = "SELECT p.*, u.name AS student_name, u.email AS student_email FROM projects p JOIN users u ON p.student_id = u.id WHERE 1=1";
+        $params = [];
+
+        if ($student_id > 0) {
+            $query .= " AND p.student_id = :student_id";
+            $params[':student_id'] = $student_id;
         }
-    } else {
-        // Fetch paginated list
-        $search = isset($_GET['search']) ? sanitize($_GET['search']) : '';
-        $filterUserId = isset($_GET['user_id']) ? intval($_GET['user_id']) : 0;
-        $page = isset($_GET['page']) ? intval($_GET['page']) : 1;
-        if ($page < 1) $page = 1;
-        $limit = 10;
-        $offset = ($page - 1) * $limit;
+
+        if ($search) {
+            $query .= " AND (p.title LIKE :search OR p.description LIKE :search OR p.tech_stack LIKE :search)";
+            $params[':search'] = $search;
+        }
+
+        $query .= " ORDER BY p.created_at DESC";
 
         try {
-            $whereClauses = [];
-            $params = [];
-
-            if (!empty($search)) {
-                $whereClauses[] = "(p.title LIKE :search OR p.description LIKE :search)";
-                $params[':search'] = "%" . $search . "%";
-            }
-            if ($filterUserId > 0) {
-                $whereClauses[] = "p.user_id = :user_id";
-                $params[':user_id'] = $filterUserId;
-            }
-
-            $whereSql = "";
-            if (count($whereClauses) > 0) {
-                $whereSql = "WHERE " . implode(" AND ", $whereClauses);
-            }
-
-            // Count total
-            $countStmt = $db->prepare("SELECT COUNT(*) as total FROM projects p $whereSql");
-            $countStmt->execute($params);
-            $totalCount = intval($countStmt->fetch()['total']);
-
-            // Get projects
-            $query = "
-                SELECT p.*, u.full_name as student_name, u.email as student_email 
-                FROM projects p
-                JOIN users u ON p.user_id = u.id
-                $whereSql
-                ORDER BY p.created_at DESC
-                LIMIT $limit OFFSET $offset
-            ";
             $stmt = $db->prepare($query);
             $stmt->execute($params);
             $projects = $stmt->fetchAll();
+            echo json_encode(["success" => true, "projects" => $projects]);
+        } catch (Exception $e) {
+            http_response_code(500);
+            echo json_encode(["success" => false, "message" => "Database error: " . $e->getMessage()]);
+        }
+        break;
 
-            jsonResponse(true, "Projects retrieved.", [
-                "projects" => $projects,
-                "pagination" => [
-                    "total_records" => $totalCount,
-                    "total_pages" => ceil($totalCount / $limit),
-                    "current_page" => $page,
-                    "limit" => $limit
-                ]
+    case 'POST':
+        // Upload a new project (Student only, or admin on student's behalf, but generally any logged-in user)
+        $currentUser = JWTHelper::requireAuth();
+
+        if (!isset($data['title']) || !isset($data['description']) || !isset($data['tech_stack'])) {
+            http_response_code(400);
+            echo json_encode(["success" => false, "message" => "Title, description, and tech stack are required."]);
+            break;
+        }
+
+        $title = trim($data['title']);
+        $description = trim($data['description']);
+        $tech_stack = trim($data['tech_stack']);
+        $github_url = isset($data['github_url']) ? trim($data['github_url']) : null;
+        $demo_url = isset($data['demo_url']) ? trim($data['demo_url']) : null;
+
+        try {
+            $stmt = $db->prepare("INSERT INTO projects (student_id, title, description, tech_stack, github_url, demo_url) VALUES (:student_id, :title, :description, :tech_stack, :github_url, :demo_url)");
+            $stmt->execute([
+                ':student_id' => $currentUser['id'],
+                ':title' => $title,
+                ':description' => $description,
+                ':tech_stack' => $tech_stack,
+                ':github_url' => $github_url,
+                ':demo_url' => $demo_url
             ]);
-        } catch (PDOException $e) {
-            jsonResponse(false, "Error fetching projects list: " . $e->getMessage(), null, 500);
+            $projectId = $db->lastInsertId();
+
+            logActivity($db, $currentUser['id'], "Uploaded Project", "Uploaded project: $title");
+            addNotification($db, null, "general", "New Project Showcase: '$title' uploaded by " . $currentUser['name'] . ".");
+
+            echo json_encode(["success" => true, "message" => "Project uploaded successfully.", "id" => $projectId]);
+        } catch (Exception $e) {
+            http_response_code(500);
+            echo json_encode(["success" => false, "message" => "Database error: " . $e->getMessage()]);
         }
-    }
-} else if ($method === 'POST') {
-    createProject($db, $user, $input);
-} else if ($method === 'PUT') {
-    updateProject($db, $user, $input);
-} else if ($method === 'DELETE') {
-    deleteProject($db, $user);
-} else {
-    jsonResponse(false, "Method not allowed.", null, 405);
-}
+        break;
 
-// CREATE PROJECT
-function createProject($db, $user, $input) {
-    $title = isset($input['title']) ? sanitize($input['title']) : '';
-    $description = isset($input['description']) ? sanitize($input['description']) : '';
-    $githubLink = isset($input['github_link']) ? sanitize($input['github_link']) : '';
-    $demoLink = isset($input['demo_link']) ? sanitize($input['demo_link']) : '';
+    case 'DELETE':
+        // Delete a project (Owner or Admin only)
+        $currentUser = JWTHelper::requireAuth();
+        $id = isset($_GET['id']) ? intval($_GET['id']) : 0;
 
-    if (empty($title) || empty($description)) {
-        jsonResponse(false, "Title and description are required.", null, 400);
-    }
-
-    try {
-        $stmt = $db->prepare("
-            INSERT INTO projects (title, description, github_link, demo_link, user_id) 
-            VALUES (:title, :description, :github_link, :demo_link, :user_id)
-        ");
-        $stmt->execute([
-            ':title' => $title,
-            ':description' => $description,
-            ':github_link' => $githubLink,
-            ':demo_link' => $demoLink,
-            ':user_id' => $user['id']
-        ]);
-
-        $newProjectId = $db->lastInsertId();
-        logActivity($db, $user['id'], "Added showcase project: " . $title);
-
-        jsonResponse(true, "Project added successfully.", ["project_id" => $newProjectId], 201);
-    } catch (PDOException $e) {
-        jsonResponse(false, "Failed to add project: " . $e->getMessage(), null, 500);
-    }
-}
-
-// UPDATE PROJECT
-function updateProject($db, $user, $input) {
-    $projectId = isset($input['id']) ? intval($input['id']) : 0;
-    if ($projectId <= 0) {
-        jsonResponse(false, "Invalid project ID.", null, 400);
-    }
-
-    $title = isset($input['title']) ? sanitize($input['title']) : '';
-    $description = isset($input['description']) ? sanitize($input['description']) : '';
-    $githubLink = isset($input['github_link']) ? sanitize($input['github_link']) : '';
-    $demoLink = isset($input['demo_link']) ? sanitize($input['demo_link']) : '';
-
-    if (empty($title) || empty($description)) {
-        jsonResponse(false, "Title and description are required.", null, 400);
-    }
-
-    try {
-        // Fetch project to verify ownership
-        $stmt = $db->prepare("SELECT user_id FROM projects WHERE id = :id LIMIT 1");
-        $stmt->execute([':id' => $projectId]);
-        $project = $stmt->fetch();
-
-        if (!$project) {
-            jsonResponse(false, "Project not found.", null, 404);
+        if ($id <= 0) {
+            http_response_code(400);
+            echo json_encode(["success" => false, "message" => "Invalid project ID."]);
+            break;
         }
 
-        // Ownership verify: only project owner or admin can update
-        if ($project['user_id'] !== $user['id'] && $user['role'] !== 'admin') {
-            jsonResponse(false, "Access denied. You can only edit your own projects.", null, 403);
+        try {
+            $stmt = $db->prepare("SELECT student_id, title FROM projects WHERE id = :id");
+            $stmt->execute([':id' => $id]);
+            $project = $stmt->fetch();
+
+            if (!$project) {
+                http_response_code(404);
+                echo json_encode(["success" => false, "message" => "Project not found."]);
+                break;
+            }
+
+            if ($project['student_id'] !== $currentUser['id'] && $currentUser['role'] !== 'admin') {
+                http_response_code(403);
+                echo json_encode(["success" => false, "message" => "You do not have permission to delete this project."]);
+                break;
+            }
+
+            $del = $db->prepare("DELETE FROM projects WHERE id = :id");
+            $del->execute([':id' => $id]);
+
+            logActivity($db, $currentUser['id'], "Deleted Project", "Deleted project: " . $project['title']);
+
+            echo json_encode(["success" => true, "message" => "Project deleted successfully."]);
+        } catch (Exception $e) {
+            http_response_code(500);
+            echo json_encode(["success" => false, "message" => "Database error: " . $e->getMessage()]);
         }
+        break;
 
-        $stmt = $db->prepare("
-            UPDATE projects 
-            SET title = :title, description = :description, github_link = :github_link, demo_link = :demo_link 
-            WHERE id = :id
-        ");
-        $stmt->execute([
-            ':title' => $title,
-            ':description' => $description,
-            ':github_link' => $githubLink,
-            ':demo_link' => $demoLink,
-            ':id' => $projectId
-        ]);
-
-        logActivity($db, $user['id'], "Updated project ID: " . $projectId . " ($title)");
-        jsonResponse(true, "Project updated successfully.");
-    } catch (PDOException $e) {
-        jsonResponse(false, "Failed to update project: " . $e->getMessage(), null, 500);
-    }
-}
-
-// DELETE PROJECT
-function deleteProject($db, $user) {
-    $projectId = isset($_GET['id']) ? intval($_GET['id']) : 0;
-    if ($projectId <= 0) {
-        jsonResponse(false, "Invalid project ID.", null, 400);
-    }
-
-    try {
-        // Fetch project to check ownership
-        $stmt = $db->prepare("SELECT user_id, title FROM projects WHERE id = :id LIMIT 1");
-        $stmt->execute([':id' => $projectId]);
-        $project = $stmt->fetch();
-
-        if (!$project) {
-            jsonResponse(false, "Project not found.", null, 404);
-        }
-
-        // Ownership verify
-        if ($project['user_id'] !== $user['id'] && $user['role'] !== 'admin') {
-            jsonResponse(false, "Access denied. You can only delete your own projects.", null, 403);
-        }
-
-        $stmt = $db->prepare("DELETE FROM projects WHERE id = :id");
-        $stmt->execute([':id' => $projectId]);
-
-        logActivity($db, $user['id'], "Deleted showcase project: " . $project['title']);
-        jsonResponse(true, "Project deleted successfully.");
-    } catch (PDOException $e) {
-        jsonResponse(false, "Failed to delete project: " . $e->getMessage(), null, 500);
-    }
+    default:
+        http_response_code(405);
+        echo json_encode(["success" => false, "message" => "Method not allowed."]);
+        break;
 }
 ?>

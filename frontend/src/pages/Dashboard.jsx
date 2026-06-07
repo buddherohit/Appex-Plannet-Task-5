@@ -1,453 +1,273 @@
-// frontend/src/pages/Dashboard.jsx
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { useAuth } from '../context/AuthContext';
-import Sidebar from '../components/Sidebar';
-import api, { API_BASE_URL } from '../services/api';
-import { Line, Bar } from 'react-chartjs-2';
-import {
-  Chart as ChartJS,
-  CategoryScale,
-  LinearScale,
-  PointElement,
-  LineElement,
-  BarElement,
-  Title,
-  Tooltip,
-  Legend,
-  Filler
-} from 'chart.js';
-
-// Register Chart.js structures
-ChartJS.register(
-  CategoryScale,
-  LinearScale,
-  PointElement,
-  LineElement,
-  BarElement,
-  Title,
-  Tooltip,
-  Legend,
-  Filler
-);
+import api from '../helpers/api';
 
 const Dashboard = () => {
-  const { user } = useAuth();
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [user, setUser] = useState(JSON.parse(localStorage.getItem('careerbridge_user') || '{}'));
+  const [applications, setApplications] = useState([]);
+  const [recentJobs, setRecentJobs] = useState([]);
+  const [recentInternships, setRecentInternships] = useState([]);
+  const [activityLogs, setActivityLogs] = useState([]);
+  
   const [loading, setLoading] = useState(true);
-  const [stats, setStats] = useState({
-    total_students: 0,
-    total_courses: 0,
-    total_notes: 0,
-    total_projects: 0,
-    total_jobs: 0
-  });
-  const [analytics, setAnalytics] = useState({
-    registrations: { labels: [], data: [] },
-    courses_by_category: { labels: [], data: [] },
-    jobs_posted: { labels: [], data: [] }
-  });
-  const [activity, setActivity] = useState([]);
   const [error, setError] = useState('');
 
-  useEffect(() => {
-    const fetchDashboardData = async () => {
-      try {
-        const response = await api.get('/api/dashboard.php');
-        if (response.data.success) {
-          const { stats: fetchedStats, analytics: fetchedAnalytics, activity: fetchedActivity } = response.data.data;
-          setStats(fetchedStats);
-          setAnalytics(fetchedAnalytics);
-          setActivity(fetchedActivity);
-        } else {
-          setError(response.data.message || "Failed to load dashboard data.");
-        }
-      } catch (err) {
-        console.error("Dashboard error:", err);
-        setError("Connection error. Could not connect to API server.");
-      } finally {
-        setLoading(false);
-      }
-    };
+  const loadDashboardData = async () => {
+    setLoading(true);
+    setError('');
+    try {
+      // Parallel REST calls
+      const [appsRes, jobsRes, intsRes, logsRes] = await Promise.all([
+        api.get('/applications.php'),
+        api.get('/jobs.php'),
+        api.get('/internships.php'),
+        api.get('/activity_logs.php')
+      ]);
 
-    fetchDashboardData();
+      if (appsRes.data.success) setApplications(appsRes.data.applications);
+      if (jobsRes.data.success) setRecentJobs(jobsRes.data.jobs.slice(0, 3));
+      if (intsRes.data.success) setRecentInternships(intsRes.data.internships.slice(0, 3));
+      if (logsRes.data.success) setActivityLogs(logsRes.data.logs.slice(0, 5));
+
+    } catch (err) {
+      console.error(err);
+      setError('Failed to fetch dashboard metrics. Please reload.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadDashboardData();
   }, []);
 
-  const toggleSidebar = () => {
-    setSidebarOpen(!sidebarOpen);
-  };
-
-  // Resolve profile photo
-  const getAvatarUrl = () => {
-    if (user && user.profile_image) {
-      return `${API_BASE_URL}/${user.profile_image}`;
+  const getStatusBadge = (status) => {
+    switch (status) {
+      case 'accepted': return <span className="badge bg-success bg-opacity-25 text-success border border-success badge-custom">Accepted</span>;
+      case 'rejected': return <span className="badge bg-danger bg-opacity-25 text-danger border border-danger badge-custom">Rejected</span>;
+      case 'reviewed': return <span className="badge bg-warning bg-opacity-25 text-warning border border-warning badge-custom">Reviewed</span>;
+      default: return <span className="badge bg-secondary bg-opacity-25 text-white border border-secondary badge-custom">Pending</span>;
     }
-    return null;
   };
 
-  // Chart configurations & themes
-  const isDarkMode = document.documentElement.getAttribute('data-theme') === 'dark';
-  const gridColor = isDarkMode ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.05)';
-  const textColor = isDarkMode ? '#94a3b8' : '#64748b';
-
-  const chartOptions = (title) => ({
-    responsive: true,
-    maintainAspectRatio: false,
-    plugins: {
-      legend: {
-        display: false
-      },
-      title: {
-        display: true,
-        text: title,
-        color: isDarkMode ? '#f8fafc' : '#1e293b',
-        font: { size: 14, weight: 'bold', family: 'Outfit' }
-      }
-    },
-    scales: {
-      x: {
-        grid: { color: gridColor },
-        ticks: { color: textColor, font: { family: 'Outfit' } }
-      },
-      y: {
-        grid: { color: gridColor },
-        ticks: { color: textColor, font: { family: 'Outfit' } }
-      }
-    }
-  });
-
-  const registrationChartData = {
-    labels: analytics.registrations.labels.length > 0 ? analytics.registrations.labels : ['No Data'],
-    datasets: [{
-      label: 'Students Registered',
-      data: analytics.registrations.data.length > 0 ? analytics.registrations.data : [0],
-      fill: true,
-      backgroundColor: 'rgba(99, 102, 241, 0.1)',
-      borderColor: '#6366f1',
-      borderWidth: 2,
-      tension: 0.3,
-      pointBackgroundColor: '#4f46e5'
-    }]
-  };
-
-  const coursesChartData = {
-    labels: analytics.courses_by_category.labels.length > 0 ? analytics.courses_by_category.labels : ['No Data'],
-    datasets: [{
-      label: 'Course Count',
-      data: analytics.courses_by_category.data.length > 0 ? analytics.courses_by_category.data : [0],
-      backgroundColor: 'rgba(14, 165, 233, 0.75)',
-      borderColor: '#0ea5e9',
-      borderWidth: 1,
-      borderRadius: 6
-    }]
-  };
-
-  const jobsChartData = {
-    labels: analytics.jobs_posted.labels.length > 0 ? analytics.jobs_posted.labels : ['No Data'],
-    datasets: [{
-      label: 'Jobs Posted',
-      data: analytics.jobs_posted.data.length > 0 ? analytics.jobs_posted.data : [0],
-      fill: true,
-      backgroundColor: 'rgba(16, 185, 129, 0.1)',
-      borderColor: '#10b981',
-      borderWidth: 2,
-      tension: 0.3,
-      pointBackgroundColor: '#059669'
-    }]
-  };
+  if (loading) {
+    return (
+      <div className="container py-5 text-center text-white" style={{ minHeight: '60vh' }}>
+        <div className="spinner-border text-primary" role="status">
+          <span className="visually-hidden">Loading...</span>
+        </div>
+        <p className="mt-3 text-secondary">Assembling your workspace...</p>
+      </div>
+    );
+  }
 
   return (
-    <div className="d-flex min-vh-100" style={{ paddingTop: '80px' }}>
-      
-      {/* Sidebar Navigation */}
-      <Sidebar isOpen={sidebarOpen} toggleSidebar={toggleSidebar} />
-
-      {/* Main dashboard body */}
-      <div className="main-content">
-        
-        {/* Toggle Mobile Menu Indicator */}
-        <div className="d-lg-none mb-3">
-          <button onClick={toggleSidebar} className="btn btn-primary-custom d-flex align-items-center gap-2">
-            <i className="bi bi-list"></i> Menu
-          </button>
+    <div className="container py-5">
+      {/* Welcome Banner */}
+      <div className="glass-card p-4 mb-4 text-white d-flex flex-column flex-md-row justify-content-between align-items-center gap-3">
+        <div>
+          <h2 className="fw-bold mb-1">Welcome back, {user.name}!</h2>
+          <p className="text-secondary mb-0">Role: <span className="text-capitalize">{user.role}</span> | Manage applications and learning worksheets.</p>
         </div>
+        <div className="d-flex gap-2">
+          <Link to="/profile" className="btn btn-outline-light border-secondary text-white px-3 py-2 small">
+            <i className="bi bi-person-gear me-1"></i> Edit Profile
+          </Link>
+          <Link to="/placement" className="btn btn-primary-custom px-3 py-2 small">
+            <i className="bi bi-rocket-takeoff-fill me-1"></i> Prep Materials
+          </Link>
+        </div>
+      </div>
 
-        {loading ? (
-          <div className="d-flex justify-content-center align-items-center py-5">
-            <div className="spinner-border text-primary" role="status">
-              <span className="visually-hidden">Loading data...</span>
+      {error && <div className="alert alert-danger border-0 bg-danger bg-opacity-25 text-white py-2 small mb-4">{error}</div>}
+
+      <div className="row g-4">
+        {/* Main Content Area */}
+        <div className="col-lg-8">
+          
+          {/* Stats Widgets */}
+          <div className="row g-3 mb-4">
+            <div className="col-md-4">
+              <div className="glass-card p-3 text-center">
+                <h4 className="fw-bold text-white mb-0">{applications.length}</h4>
+                <small className="text-secondary">Submitted Applications</small>
+              </div>
+            </div>
+            <div className="col-md-4">
+              <div className="glass-card p-3 text-center">
+                <h4 className="fw-bold text-success mb-0">
+                  {applications.filter(a => a.status === 'accepted').length}
+                </h4>
+                <small className="text-secondary">Offers Accepted</small>
+              </div>
+            </div>
+            <div className="col-md-4">
+              <div className="glass-card p-3 text-center">
+                <h4 className="fw-bold text-warning mb-0">
+                  {applications.filter(a => a.status === 'reviewed').length}
+                </h4>
+                <small className="text-secondary">Under Review</small>
+              </div>
             </div>
           </div>
-        ) : (
-          <div>
-            
-            {/* Error Message */}
-            {error && (
-              <div className="alert alert-danger border-0 mb-4" role="alert">
-                <i className="bi bi-exclamation-octagon-fill me-2"></i> {error}
-              </div>
-            )}
 
-            {/* 1. WELCOME BANNER */}
-            <div className="glass-card p-4 p-md-5 mb-4 border-0 position-relative overflow-hidden" style={{
-              background: 'linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%)',
-              color: '#ffffff'
-            }}>
-              <div className="row align-items-center">
-                <div className="col-md-8">
-                  <h1 className="fw-bold mb-2">Welcome Back, {user.full_name}!</h1>
-                  <p className="mb-0 opacity-90" style={{ fontSize: '1.05rem' }}>
-                    {user.role === 'admin' 
-                      ? "Here are the metrics, analytical trends, and activity logs across the Career & Placement Portal."
-                      : "Access notes, browse courses, keep your projects updated, and view active job listings."
-                    }
-                  </p>
-                </div>
-                <div className="col-md-4 text-md-end mt-3 mt-md-0">
-                  <span className="badge bg-white text-primary text-uppercase px-3 py-2 rounded-pill fw-bold border border-white border-opacity-25">
-                    Role: {user.role}
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            {/* 2. STATS ROW */}
-            <div className="row g-4 mb-4">
-              {user.role === 'admin' ? (
-                <div className="col-lg-3 col-sm-6">
-                  <div className="glass-card p-4 h-100 d-flex align-items-center gap-3">
-                    <div className="rounded p-3 bg-primary bg-opacity-10 text-primary">
-                      <i className="bi bi-people-fill fs-3"></i>
-                    </div>
-                    <div>
-                      <h4 className="fw-bold mb-0">{stats.total_students}</h4>
-                      <small className="text-muted">Students Registered</small>
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                <div className="col-lg-3 col-sm-6">
-                  <div className="glass-card p-4 h-100 d-flex align-items-center gap-3">
-                    <div className="rounded p-3 bg-primary bg-opacity-10 text-primary">
-                      <i className="bi bi-code-square fs-3"></i>
-                    </div>
-                    <div>
-                      <h4 className="fw-bold mb-0">{stats.total_projects}</h4>
-                      <small className="text-muted">My Projects</small>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              <div className="col-lg-3 col-sm-6">
-                <div className="glass-card p-4 h-100 d-flex align-items-center gap-3">
-                  <div className="rounded p-3 bg-info bg-opacity-10 text-info">
-                    <i className="bi bi-mortarboard-fill fs-3"></i>
-                  </div>
-                  <div>
-                    <h4 className="fw-bold mb-0">{stats.total_courses}</h4>
-                    <small className="text-muted">Available Courses</small>
-                  </div>
-                </div>
-              </div>
-
-              <div className="col-lg-3 col-sm-6">
-                <div className="glass-card p-4 h-100 d-flex align-items-center gap-3">
-                  <div className="rounded p-3 bg-success bg-opacity-10 text-success">
-                    <i className="bi bi-journal-richtext fs-3"></i>
-                  </div>
-                  <div>
-                    <h4 className="fw-bold mb-0">{stats.total_notes}</h4>
-                    <small className="text-muted">Study Resources</small>
-                  </div>
-                </div>
-              </div>
-
-              <div className="col-lg-3 col-sm-6">
-                <div className="glass-card p-4 h-100 d-flex align-items-center gap-3">
-                  <div className="rounded p-3 bg-warning bg-opacity-10 text-warning">
-                    <i className="bi bi-briefcase-fill fs-3"></i>
-                  </div>
-                  <div>
-                    <h4 className="fw-bold mb-0">{stats.total_jobs}</h4>
-                    <small className="text-muted">Placements & Jobs</small>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* 3. MIDDLE SECTION: ROLE DEPENDENT */}
-            {user.role === 'admin' ? (
-              /* ADMIN ANALYTICS DASHBOARD */
-              <div className="row g-4 mb-4">
-                {/* Registrations graph */}
-                <div className="col-lg-6">
-                  <div className="glass-card p-4" style={{ height: '350px' }}>
-                    <Line options={chartOptions('Student Registrations Trend')} data={registrationChartData} />
-                  </div>
-                </div>
-                {/* Courses categories bar chart */}
-                <div className="col-lg-6">
-                  <div className="glass-card p-4" style={{ height: '350px' }}>
-                    <Bar options={chartOptions('Course Category Distribution')} data={coursesChartData} />
-                  </div>
-                </div>
-                {/* Jobs postings trend */}
-                <div className="col-lg-12">
-                  <div className="glass-card p-4" style={{ height: '320px' }}>
-                    <Line options={chartOptions('Job & Internship Posting Frequency')} data={jobsChartData} />
-                  </div>
+          {/* Applications Tracking */}
+          <div className="glass-card p-4 mb-4">
+            <h5 className="fw-semibold text-white mb-3"><i className="bi bi-file-earmark-check me-2 text-primary"></i>Application Progress</h5>
+            {applications.length === 0 ? (
+              <div className="p-4 text-center text-muted">
+                <i className="bi bi-archive fs-3 d-block mb-2"></i>
+                You haven't submitted any job or internship applications yet.
+                <div className="mt-3">
+                  <Link to="/jobs" className="btn btn-primary-custom btn-sm me-2">Browse Jobs</Link>
+                  <Link to="/internships" className="btn btn-secondary-custom btn-sm">Browse Internships</Link>
                 </div>
               </div>
             ) : (
-              /* STUDENT DASHBOARD PROFILE CARD & QUICK LINKS */
-              <div className="row g-4 mb-4">
-                {/* Profile Card */}
-                <div className="col-lg-4">
-                  <div className="glass-card p-4 text-center h-100">
-                    <div className="position-relative d-inline-block mb-3">
-                      {getAvatarUrl() ? (
-                        <img 
-                          src={getAvatarUrl()} 
-                          alt={user.full_name} 
-                          className="rounded-circle object-fit-cover shadow border border-primary border-3" 
-                          style={{ width: '120px', height: '120px' }}
-                        />
-                      ) : (
-                        <div 
-                          className="rounded-circle text-white d-flex align-items-center justify-content-center fw-bold shadow border border-primary border-3" 
-                          style={{ width: '120px', height: '120px', fontSize: '3rem', backgroundColor: 'var(--primary-color)' }}
-                        >
-                          {user.full_name.charAt(0).toUpperCase()}
-                        </div>
-                      )}
-                    </div>
-                    <h4 className="fw-bold mb-1">{user.full_name}</h4>
-                    <p className="text-muted mb-3 text-capitalize">{user.role}</p>
-                    <ul className="list-unstyled text-start mb-4 bg-light bg-opacity-5 p-3 rounded" style={{ fontSize: '0.9rem' }}>
-                      <li className="d-flex align-items-center gap-2 mb-2">
-                        <i className="bi bi-envelope-fill text-primary"></i>
-                        <span className="text-truncate">{user.email}</span>
-                      </li>
-                      <li className="d-flex align-items-center gap-2">
-                        <i className="bi bi-telephone-fill text-primary"></i>
-                        <span>{user.mobile}</span>
-                      </li>
-                    </ul>
-                    <Link to="/profile" className="btn btn-secondary-custom w-100 py-2 btn-sm">
-                      <i className="bi bi-pencil-square me-1"></i> Edit Profile
-                    </Link>
-                  </div>
-                </div>
-
-                {/* Quick actions panel */}
-                <div className="col-lg-8">
-                  <div className="glass-card p-4 h-100">
-                    <h5 className="fw-bold mb-4 text-main-color">Placement Prep Shortcuts</h5>
-                    
-                    <div className="row g-3">
-                      <div className="col-md-6">
-                        <div className="p-3 border rounded h-100 d-flex flex-column justify-content-between">
-                          <div>
-                            <h6 className="fw-bold mb-1"><i className="bi bi-journal-arrow-up text-primary me-2"></i> Notes Hub</h6>
-                            <p className="text-muted small mb-3">Upload your class files, or read other students notes for quick exams prep.</p>
-                          </div>
-                          <Link to="/notes" className="btn btn-sm btn-primary-custom w-fit">Open Notes</Link>
-                        </div>
-                      </div>
-
-                      <div className="col-md-6">
-                        <div className="p-3 border rounded h-100 d-flex flex-column justify-content-between">
-                          <div>
-                            <h6 className="fw-bold mb-1"><i className="bi bi-github text-primary me-2"></i> Project Showcase</h6>
-                            <p className="text-muted small mb-3">Add links to your github projects so admins and reviewers can verify them.</p>
-                          </div>
-                          <Link to="/projects" className="btn btn-sm btn-primary-custom w-fit">Manage Projects</Link>
-                        </div>
-                      </div>
-
-                      <div className="col-md-6">
-                        <div className="p-3 border rounded h-100 d-flex flex-column justify-content-between">
-                          <div>
-                            <h6 className="fw-bold mb-1"><i className="bi bi-laptop text-primary me-2"></i> Study Materials</h6>
-                            <p className="text-muted small mb-3">Browse standard courses across major software programming concepts.</p>
-                          </div>
-                          <Link to="/courses" className="btn btn-sm btn-primary-custom w-fit">Explore Courses</Link>
-                        </div>
-                      </div>
-
-                      <div className="col-md-6">
-                        <div className="p-3 border rounded h-100 d-flex flex-column justify-content-between">
-                          <div>
-                            <h6 className="fw-bold mb-1"><i className="bi bi-person-workspace text-primary me-2"></i> Jobs Board</h6>
-                            <p className="text-muted small mb-3">Check active job details, find internships, and click redirects to apply.</p>
-                          </div>
-                          <Link to="/jobs" className="btn btn-sm btn-primary-custom w-fit">Browse Jobs</Link>
-                        </div>
-                      </div>
-                    </div>
-
-                  </div>
-                </div>
+              <div className="table-responsive">
+                <table className="table table-dark table-hover border-secondary mb-0 align-middle" style={{ background: 'transparent' }}>
+                  <thead>
+                    <tr className="border-secondary text-secondary">
+                      <th>Type</th>
+                      <th>Position & Company</th>
+                      <th>Applied Date</th>
+                      <th>Resume</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {applications.map((app) => (
+                      <tr key={app.id} className="border-secondary">
+                        <td className="text-capitalize small">
+                          {app.type === 'job' ? (
+                            <span className="badge bg-primary bg-opacity-25 text-primary border border-primary badge-custom">Job</span>
+                          ) : (
+                            <span className="badge bg-success bg-opacity-25 text-success border border-success badge-custom">Internship</span>
+                          )}
+                        </td>
+                        <td>
+                          <div className="fw-semibold text-white">{app.position_title}</div>
+                          <div className="small text-secondary">{app.company_name}</div>
+                        </td>
+                        <td className="small text-secondary">{new Date(app.applied_at).toLocaleDateString()}</td>
+                        <td>
+                          <a 
+                            href={`http://localhost:8000/${app.resume_path}`} 
+                            target="_blank" 
+                            rel="noopener noreferrer" 
+                            className="btn btn-outline-light btn-sm border-secondary text-white py-1 px-2"
+                            title="Download Resume"
+                          >
+                            <i className="bi bi-file-earmark-arrow-down-fill text-warning"></i> PDF
+                          </a>
+                        </td>
+                        <td>{getStatusBadge(app.status)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             )}
-
-            {/* 4. ACTIVITY LOGS (Admin gets global log table, Student gets personal activity feed) */}
-            <div className="glass-card p-4">
-              <h5 className="fw-bold mb-4 text-main-color">
-                {user.role === 'admin' ? "System Activity Logs" : "My Recent Activities"}
-              </h5>
-
-              {activity.length === 0 ? (
-                <p className="text-muted mb-0">No registered activities found.</p>
-              ) : (
-                <div className="table-responsive">
-                  <table className="table table-hover align-middle mb-0" style={{ fontSize: '0.9rem' }}>
-                    <thead>
-                      <tr>
-                        {user.role === 'admin' && <th scope="col">User</th>}
-                        {user.role === 'admin' && <th scope="col">Role</th>}
-                        <th scope="col">Action Details</th>
-                        <th scope="col">Timestamp</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {activity.map((log) => (
-                        <tr key={log.id}>
-                          {user.role === 'admin' && (
-                            <td>
-                              <div className="fw-semibold">{log.full_name}</div>
-                              <small className="text-muted">{log.email}</small>
-                            </td>
-                          )}
-                          {user.role === 'admin' && (
-                            <td>
-                              <span className={`badge bg-opacity-10 text-uppercase ${log.role === 'admin' ? 'bg-danger text-danger' : 'bg-primary text-primary'}`}>
-                                {log.role}
-                              </span>
-                            </td>
-                          )}
-                          <td>
-                            <i className="bi bi-dot text-primary fs-4 align-middle"></i>
-                            {log.action}
-                          </td>
-                          <td className="text-muted">
-                            {new Date(log.created_at).toLocaleString('en-US', {
-                              dateStyle: 'medium',
-                              timeStyle: 'short'
-                            })}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-
           </div>
-        )}
 
+          {/* Activity Timeline */}
+          <div className="glass-card p-4">
+            <h5 className="fw-semibold text-white mb-3"><i className="bi bi-clock-history me-2 text-info"></i>Activity Timeline</h5>
+            {activityLogs.length === 0 ? (
+              <p className="text-muted text-center py-3">No activity recorded yet.</p>
+            ) : (
+              <div className="d-flex flex-column gap-3">
+                {activityLogs.map((log) => (
+                  <div key={log.id} className="d-flex gap-3 align-items-start">
+                    <div className="bg-secondary bg-opacity-25 border border-secondary rounded p-2 text-center" style={{ width: '40px', height: '40px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <i className="bi bi-lightning-charge-fill text-warning fs-6"></i>
+                    </div>
+                    <div>
+                      <h6 className="fw-semibold text-white mb-0">{log.action}</h6>
+                      <p className="text-secondary small mb-0">{log.details}</p>
+                      <small className="text-muted text-xxs">{new Date(log.created_at).toLocaleString()}</small>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+        </div>
+
+        {/* Sidebar widgets */}
+        <div className="col-lg-4">
+          
+          {/* Quick Profile Summary */}
+          <div className="glass-card p-4 mb-4 text-center">
+            {user.profile_pic ? (
+              <img 
+                src={`http://localhost:8000/${user.profile_pic}`} 
+                alt="Profile" 
+                className="rounded-circle object-fit-cover border border-secondary mx-auto mb-3"
+                style={{ width: '100px', height: '100px' }}
+                onError={(e) => {
+                  e.target.onerror = null;
+                  e.target.src = "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=120&auto=format&fit=crop";
+                }}
+              />
+            ) : (
+              <div className="rounded-circle bg-primary d-flex align-items-center justify-content-center text-white border border-secondary mx-auto mb-3" style={{ width: '100px', height: '100px', fontSize: '2.5rem' }}>
+                {user.name.charAt(0).toUpperCase()}
+              </div>
+            )}
+            <h5 className="fw-bold text-white mb-1">{user.name}</h5>
+            <p className="text-secondary mb-3 small">{user.email}</p>
+            <div className="border-top border-secondary border-opacity-25 pt-3">
+              <span className="badge bg-secondary bg-opacity-25 text-white border border-secondary badge-custom py-2 px-3 text-capitalize">
+                Role: {user.role} User
+              </span>
+            </div>
+          </div>
+
+          {/* Recently Posted Jobs */}
+          <div className="glass-card p-4 mb-4">
+            <div className="d-flex align-items-center justify-content-between mb-3">
+              <h6 className="fw-bold text-white mb-0">Recent Jobs</h6>
+              <Link to="/jobs" className="text-primary text-decoration-none small">View all</Link>
+            </div>
+            {recentJobs.length === 0 ? (
+              <p className="text-muted small">No jobs listed yet.</p>
+            ) : (
+              <div className="d-flex flex-column gap-3">
+                {recentJobs.map(job => (
+                  <div key={job.id} className="pb-3 border-bottom border-secondary border-opacity-25 last-border-none">
+                    <h6 className="fw-semibold text-white mb-0">{job.title}</h6>
+                    <small className="text-secondary d-block">{job.company} — {job.location}</small>
+                    <small className="text-muted" style={{ fontSize: '0.75rem' }}>Salary: {job.salary}</small>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Recently Posted Internships */}
+          <div className="glass-card p-4">
+            <div className="d-flex align-items-center justify-content-between mb-3">
+              <h6 className="fw-bold text-white mb-0">Recent Internships</h6>
+              <Link to="/internships" className="text-primary text-decoration-none small">View all</Link>
+            </div>
+            {recentInternships.length === 0 ? (
+              <p className="text-muted small">No internships listed yet.</p>
+            ) : (
+              <div className="d-flex flex-column gap-3">
+                {recentInternships.map(intern => (
+                  <div key={intern.id} className="pb-3 border-bottom border-secondary border-opacity-25 last-border-none">
+                    <h6 className="fw-semibold text-white mb-0">{intern.title}</h6>
+                    <small className="text-secondary d-block">{intern.company} — {intern.location}</small>
+                    <small className="text-muted" style={{ fontSize: '0.75rem' }}>Stipend: {intern.stipend}</small>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+        </div>
       </div>
     </div>
   );

@@ -6,12 +6,11 @@ $data = json_decode(file_get_contents("php://input"), true);
 
 switch ($method) {
     case 'GET':
-        // Retrieve Job listings
+        // Retrieve Internship listings
         $search = isset($_GET['search']) ? '%' . trim($_GET['search']) . '%' : null;
         $location = isset($_GET['location']) ? trim($_GET['location']) : null;
-        $job_type = isset($_GET['job_type']) ? trim($_GET['job_type']) : null;
 
-        $query = "SELECT * FROM jobs WHERE 1=1";
+        $query = "SELECT * FROM internships WHERE 1=1";
         $params = [];
 
         if ($search) {
@@ -24,18 +23,13 @@ switch ($method) {
             $params[':location'] = $location;
         }
 
-        if ($job_type && $job_type !== 'All') {
-            $query .= " AND job_type = :job_type";
-            $params[':job_type'] = $job_type;
-        }
-
         $query .= " ORDER BY created_at DESC";
 
         try {
             $stmt = $db->prepare($query);
             $stmt->execute($params);
-            $jobs = $stmt->fetchAll();
-            echo json_encode(["success" => true, "jobs" => $jobs]);
+            $internships = $stmt->fetchAll();
+            echo json_encode(["success" => true, "internships" => $internships]);
         } catch (Exception $e) {
             http_response_code(500);
             echo json_encode(["success" => false, "message" => "Database error: " . $e->getMessage()]);
@@ -43,10 +37,10 @@ switch ($method) {
         break;
 
     case 'POST':
-        // Create new job posting (Admin only)
+        // Create new internship posting (Admin only)
         $currentUser = JWTHelper::requireAdmin();
 
-        if (!isset($data['title']) || !isset($data['company']) || !isset($data['description']) || !isset($data['requirements']) || !isset($data['salary']) || !isset($data['location']) || !isset($data['job_type']) || !isset($data['deadline'])) {
+        if (!isset($data['title']) || !isset($data['company']) || !isset($data['description']) || !isset($data['requirements']) || !isset($data['duration']) || !isset($data['stipend']) || !isset($data['location']) || !isset($data['deadline'])) {
             http_response_code(400);
             echo json_encode(["success" => false, "message" => "Missing required fields."]);
             break;
@@ -56,29 +50,29 @@ switch ($method) {
         $company = trim($data['company']);
         $description = trim($data['description']);
         $requirements = trim($data['requirements']);
-        $salary = trim($data['salary']);
+        $duration = trim($data['duration']);
+        $stipend = trim($data['stipend']);
         $location = trim($data['location']);
-        $job_type = trim($data['job_type']);
         $deadline = trim($data['deadline']);
 
         try {
-            $stmt = $db->prepare("INSERT INTO jobs (title, company, description, requirements, salary, location, job_type, deadline) VALUES (:title, :company, :description, :requirements, :salary, :location, :job_type, :deadline)");
+            $stmt = $db->prepare("INSERT INTO internships (title, company, description, requirements, duration, stipend, location, deadline) VALUES (:title, :company, :description, :requirements, :duration, :stipend, :location, :deadline)");
             $stmt->execute([
                 ':title' => $title,
                 ':company' => $company,
                 ':description' => $description,
                 ':requirements' => $requirements,
-                ':salary' => $salary,
+                ':duration' => $duration,
+                ':stipend' => $stipend,
                 ':location' => $location,
-                ':job_type' => $job_type,
                 ':deadline' => $deadline
             ]);
-            $jobId = $db->lastInsertId();
+            $internshipId = $db->lastInsertId();
 
-            logActivity($db, $currentUser['id'], "Created Job Posting", "Created job: $title at $company");
-            addNotification($db, null, "job", "New Job Alert: '$title' at $company. Apply before $deadline.");
+            logActivity($db, $currentUser['id'], "Created Internship", "Created internship posting: $title at $company");
+            addNotification($db, null, "internship", "New Internship: '$title' at $company. Apply before $deadline.");
 
-            echo json_encode(["success" => true, "message" => "Job posting created successfully.", "id" => $jobId]);
+            echo json_encode(["success" => true, "message" => "Internship posting created successfully.", "id" => $internshipId]);
         } catch (Exception $e) {
             http_response_code(500);
             echo json_encode(["success" => false, "message" => "Database error: " . $e->getMessage()]);
@@ -86,17 +80,17 @@ switch ($method) {
         break;
 
     case 'PUT':
-        // Update job posting (Admin only)
+        // Update internship posting (Admin only)
         $currentUser = JWTHelper::requireAdmin();
         $id = isset($_GET['id']) ? intval($_GET['id']) : 0;
 
         if ($id <= 0) {
             http_response_code(400);
-            echo json_encode(["success" => false, "message" => "Invalid job ID."]);
+            echo json_encode(["success" => false, "message" => "Invalid internship ID."]);
             break;
         }
 
-        if (!isset($data['title']) || !isset($data['company']) || !isset($data['description']) || !isset($data['requirements']) || !isset($data['salary']) || !isset($data['location']) || !isset($data['job_type']) || !isset($data['deadline'])) {
+        if (!isset($data['title']) || !isset($data['company']) || !isset($data['description']) || !isset($data['requirements']) || !isset($data['duration']) || !isset($data['stipend']) || !isset($data['location']) || !isset($data['deadline'])) {
             http_response_code(400);
             echo json_encode(["success" => false, "message" => "Missing required fields."]);
             break;
@@ -106,28 +100,28 @@ switch ($method) {
         $company = trim($data['company']);
         $description = trim($data['description']);
         $requirements = trim($data['requirements']);
-        $salary = trim($data['salary']);
+        $duration = trim($data['duration']);
+        $stipend = trim($data['stipend']);
         $location = trim($data['location']);
-        $job_type = trim($data['job_type']);
         $deadline = trim($data['deadline']);
 
         try {
-            $stmt = $db->prepare("UPDATE jobs SET title = :title, company = :company, description = :description, requirements = :requirements, salary = :salary, location = :location, job_type = :job_type, deadline = :deadline WHERE id = :id");
+            $stmt = $db->prepare("UPDATE internships SET title = :title, company = :company, description = :description, requirements = :requirements, duration = :duration, stipend = :stipend, location = :location, deadline = :deadline WHERE id = :id");
             $stmt->execute([
                 ':title' => $title,
                 ':company' => $company,
                 ':description' => $description,
                 ':requirements' => $requirements,
-                ':salary' => $salary,
+                ':duration' => $duration,
+                ':stipend' => $stipend,
                 ':location' => $location,
-                ':job_type' => $job_type,
                 ':deadline' => $deadline,
                 ':id' => $id
             ]);
 
-            logActivity($db, $currentUser['id'], "Updated Job Posting", "Updated job details for: $title at $company");
+            logActivity($db, $currentUser['id'], "Updated Internship", "Updated internship posting details for: $title at $company");
 
-            echo json_encode(["success" => true, "message" => "Job posting updated successfully."]);
+            echo json_encode(["success" => true, "message" => "Internship posting updated successfully."]);
         } catch (Exception $e) {
             http_response_code(500);
             echo json_encode(["success" => false, "message" => "Database error: " . $e->getMessage()]);
@@ -135,33 +129,33 @@ switch ($method) {
         break;
 
     case 'DELETE':
-        // Delete job posting (Admin only)
+        // Delete internship posting (Admin only)
         $currentUser = JWTHelper::requireAdmin();
         $id = isset($_GET['id']) ? intval($_GET['id']) : 0;
 
         if ($id <= 0) {
             http_response_code(400);
-            echo json_encode(["success" => false, "message" => "Invalid job ID."]);
+            echo json_encode(["success" => false, "message" => "Invalid internship ID."]);
             break;
         }
 
         try {
-            $stmt = $db->prepare("SELECT title, company FROM jobs WHERE id = :id");
+            $stmt = $db->prepare("SELECT title, company FROM internships WHERE id = :id");
             $stmt->execute([':id' => $id]);
-            $job = $stmt->fetch();
+            $internship = $stmt->fetch();
 
-            if (!$job) {
+            if (!$internship) {
                 http_response_code(404);
-                echo json_encode(["success" => false, "message" => "Job posting not found."]);
+                echo json_encode(["success" => false, "message" => "Internship posting not found."]);
                 break;
             }
 
-            $del = $db->prepare("DELETE FROM jobs WHERE id = :id");
+            $del = $db->prepare("DELETE FROM internships WHERE id = :id");
             $del->execute([':id' => $id]);
 
-            logActivity($db, $currentUser['id'], "Deleted Job Posting", "Deleted job: " . $job['title'] . " at " . $job['company']);
+            logActivity($db, $currentUser['id'], "Deleted Internship", "Deleted internship: " . $internship['title'] . " at " . $internship['company']);
 
-            echo json_encode(["success" => true, "message" => "Job posting deleted successfully."]);
+            echo json_encode(["success" => true, "message" => "Internship posting deleted successfully."]);
         } catch (Exception $e) {
             http_response_code(500);
             echo json_encode(["success" => false, "message" => "Database error: " . $e->getMessage()]);

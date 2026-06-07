@@ -1,88 +1,85 @@
-// frontend/src/components/Footer.jsx
 import React from 'react';
 import { Link } from 'react-router-dom';
 
 const Footer = () => {
   return (
-    <footer className="glass-navbar border-top mt-auto py-5" style={{ background: 'var(--glass-bg)' }}>
+    <footer className="glass-card-no-hover mt-5 rounded-0 border-start-0 border-end-0 border-bottom-0 py-5">
       <div className="container">
-        <div className="row g-4 justify-content-between">
-          
-          {/* Brand and Description */}
+        <div className="row g-4">
           <div className="col-lg-4 col-md-6">
-            <Link className="d-flex align-items-center gap-2 fw-bold fs-4 mb-3 text-decoration-none" to="/" style={{ color: 'var(--primary-color)' }}>
-              <i className="bi bi-briefcase-fill"></i>
-              <span className="text-main-color">Placement<span style={{ color: 'var(--primary-color)' }}>Portal</span></span>
-            </Link>
-            <p className="text-muted-color mb-4" style={{ fontSize: '0.9rem', lineHeight: '1.6' }}>
-              A modern Student Career & Placement Portal helping students prepare for placement processes, share study resources, showcase projects, and discover job/internship opportunities.
+            <h5 className="fw-bold mb-3 d-flex align-items-center">
+              <i className="bi bi-link-45deg text-gradient-primary fs-4 me-2"></i>
+              <span className="text-gradient-primary">Career</span>Bridge
+            </h5>
+            <p className="text-secondary" style={{ fontSize: '0.95rem', lineHeight: '1.6' }}>
+              Empowering students to cross the bridge from academics to professional excellence. High-quality courses, notes sharing, mock preparations, and active hiring roles.
             </p>
-            {/* Social Icons */}
-            <div className="d-flex gap-3">
-              <a href="https://linkedin.com" target="_blank" rel="noopener noreferrer" className="btn btn-outline-primary btn-sm rounded-circle p-2 d-flex align-items-center justify-content-center" style={{ width: '36px', height: '36px' }}>
-                <i className="bi bi-linkedin"></i>
+            <div className="d-flex gap-3 mt-4">
+              <a href="#" className="btn btn-outline-light border-secondary rounded-circle d-flex align-items-center justify-content-center" style={{ width: '40px', height: '40px' }}>
+                <i className="bi bi-facebook text-info"></i>
               </a>
-              <a href="https://github.com" target="_blank" rel="noopener noreferrer" className="btn btn-outline-primary btn-sm rounded-circle p-2 d-flex align-items-center justify-content-center" style={{ width: '36px', height: '36px' }}>
-                <i className="bi bi-github"></i>
+              <a href="#" className="btn btn-outline-light border-secondary rounded-circle d-flex align-items-center justify-content-center" style={{ width: '40px', height: '40px' }}>
+                <i className="bi bi-twitter-x text-white"></i>
               </a>
-              <a href="https://twitter.com" target="_blank" rel="noopener noreferrer" className="btn btn-outline-primary btn-sm rounded-circle p-2 d-flex align-items-center justify-content-center" style={{ width: '36px', height: '36px' }}>
-                <i className="bi bi-twitter-x"></i>
+              <a href="#" className="btn btn-outline-light border-secondary rounded-circle d-flex align-items-center justify-content-center" style={{ width: '40px', height: '40px' }}>
+                <i className="bi bi-linkedin text-primary"></i>
               </a>
-              <a href="https://facebook.com" target="_blank" rel="noopener noreferrer" className="btn btn-outline-primary btn-sm rounded-circle p-2 d-flex align-items-center justify-content-center" style={{ width: '36px', height: '36px' }}>
-                <i className="bi bi-facebook"></i>
+              <a href="#" className="btn btn-outline-light border-secondary rounded-circle d-flex align-items-center justify-content-center" style={{ width: '40px', height: '40px' }}>
+                <i className="bi bi-github text-white"></i>
               </a>
             </div>
           </div>
 
-          {/* Quick Links */}
-          <div className="col-lg-3 col-md-6 ms-lg-auto">
-            <h5 className="fw-bold mb-3 text-main-color">Quick Links</h5>
-            <ul className="list-unstyled d-flex flex-column gap-2" style={{ fontSize: '0.9rem' }}>
-              <li><Link to="/" className="text-muted-color text-decoration-none hover-primary">Home Base</Link></li>
-              <li><Link to="/about" className="text-muted-color text-decoration-none hover-primary">About Portal</Link></li>
-              <li><Link to="/courses" className="text-muted-color text-decoration-none hover-primary">Interactive Courses</Link></li>
-              <li><Link to="/notes" className="text-muted-color text-decoration-none hover-primary">Notes & PDFs</Link></li>
-              <li><Link to="/projects" className="text-muted-color text-decoration-none hover-primary">Student Showcases</Link></li>
-              <li><Link to="/jobs" className="text-muted-color text-decoration-none hover-primary">Careers Board</Link></li>
+          <div className="col-lg-2 col-md-6 col-6">
+            <h6 className="fw-semibold mb-3 text-white">Ecosystem</h6>
+            <ul className="list-unstyled d-flex flex-column gap-2" style={{ fontSize: '0.95rem' }}>
+              <li><Link to="/courses" className="text-secondary text-decoration-none hover-link">Courses</Link></li>
+              <li><Link to="/notes" className="text-secondary text-decoration-none hover-link">Study Notes</Link></li>
+              <li><Link to="/placement" className="text-secondary text-decoration-none hover-link">Placement Prep</Link></li>
+              <li><Link to="/projects" className="text-secondary text-decoration-none hover-link">Project Showcase</Link></li>
             </ul>
           </div>
 
-          {/* Contact Information */}
-          <div className="col-lg-3 col-md-6">
-            <h5 className="fw-bold mb-3 text-main-color">Contact Support</h5>
-            <ul className="list-unstyled d-flex flex-column gap-3 text-muted-color" style={{ fontSize: '0.9rem' }}>
-              <li className="d-flex align-items-center gap-2">
-                <i className="bi bi-geo-alt-fill text-primary"></i>
-                <span>Appex Planet Campus, India</span>
-              </li>
-              <li className="d-flex align-items-center gap-2">
-                <i className="bi bi-envelope-fill text-primary"></i>
-                <a href="mailto:support@placement.com" className="text-muted-color text-decoration-none">support@placement.com</a>
-              </li>
-              <li className="d-flex align-items-center gap-2">
-                <i className="bi bi-telephone-fill text-primary"></i>
-                <span>+91 99999 99999</span>
-              </li>
+          <div className="col-lg-2 col-md-6 col-6">
+            <h6 className="fw-semibold mb-3 text-white">Portals</h6>
+            <ul className="list-unstyled d-flex flex-column gap-2" style={{ fontSize: '0.95rem' }}>
+              <li><Link to="/jobs" className="text-secondary text-decoration-none hover-link">Job Board</Link></li>
+              <li><Link to="/internships" className="text-secondary text-decoration-none hover-link">Internships</Link></li>
+              <li><Link to="/dashboard" className="text-secondary text-decoration-none hover-link">Dashboard</Link></li>
+              <li><Link to="/profile" className="text-secondary text-decoration-none hover-link">Profile Settings</Link></li>
             </ul>
           </div>
 
+          <div className="col-lg-4 col-md-6">
+            <h6 className="fw-semibold mb-3 text-white">Contact Us</h6>
+            <ul className="list-unstyled d-flex flex-column gap-3 text-secondary" style={{ fontSize: '0.95rem' }}>
+              <li className="d-flex align-items-start gap-2">
+                <i className="bi bi-geo-alt-fill text-gradient-primary mt-1"></i>
+                <span>Appex Planet Campus, Sector 62, Noida, UP, 201301</span>
+              </li>
+              <li className="d-flex align-items-center gap-2">
+                <i className="bi bi-telephone-fill text-gradient-primary"></i>
+                <span>+91 98765 43210</span>
+              </li>
+              <li className="d-flex align-items-center gap-2">
+                <i className="bi bi-envelope-fill text-gradient-primary"></i>
+                <span>support@careerbridge.com</span>
+              </li>
+            </ul>
+          </div>
         </div>
 
-        <hr className="my-4 border-secondary border-opacity-10" />
+        <hr className="my-4 border-secondary opacity-25" />
 
-        <div className="row align-items-center justify-content-between text-center text-md-start">
-          <div className="col-md-6">
-            <p className="text-muted-color mb-0" style={{ fontSize: '0.85rem' }}>
-              &copy; {new Date().getFullYear()} Student Career & Placement Portal. All rights reserved.
-            </p>
-          </div>
-          <div className="col-md-6 text-md-end mt-2 mt-md-0">
-            <p className="text-muted-color mb-0" style={{ fontSize: '0.85rem' }}>
-              Designed with <i className="bi bi-heart-fill text-danger"></i> for Software Engineering Portfolios.
-            </p>
+        <div className="d-flex flex-column flex-md-row justify-content-between align-items-center gap-3">
+          <p className="mb-0 text-secondary" style={{ fontSize: '0.9rem' }}>
+            &copy; {new Date().getFullYear()} CareerBridge. All rights reserved.
+          </p>
+          <div className="d-flex gap-4" style={{ fontSize: '0.9rem' }}>
+            <a href="#" className="text-secondary text-decoration-none">Privacy Policy</a>
+            <a href="#" className="text-secondary text-decoration-none">Terms of Service</a>
           </div>
         </div>
-
       </div>
     </footer>
   );

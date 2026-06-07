@@ -1,108 +1,125 @@
-// frontend/src/App.jsx
 import React from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import { AuthProvider } from './context/AuthContext';
-
-// Components & Layout
-import Header from './components/Header';
+import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import Navbar from './components/Navbar';
 import Footer from './components/Footer';
 import ProtectedRoute from './components/ProtectedRoute';
 
 // Pages
-import LandingPage from './pages/LandingPage';
-import AboutPage from './pages/AboutPage';
-import LoginPage from './pages/LoginPage';
-import RegisterPage from './pages/RegisterPage';
-import ForgotPasswordPage from './pages/ForgotPasswordPage';
-import ResetPasswordPage from './pages/ResetPasswordPage';
+import Home from './pages/Home';
+import About from './pages/About';
+import Login from './pages/Login';
+import Register from './pages/Register';
 import Dashboard from './pages/Dashboard';
+import AdminPanel from './pages/AdminPanel';
 import Courses from './pages/Courses';
 import Notes from './pages/Notes';
-import Projects from './pages/Projects';
+import Internships from './pages/Internships';
 import Jobs from './pages/Jobs';
+import Projects from './pages/Projects';
+import PlacementPrep from './pages/PlacementPrep';
 import Profile from './pages/Profile';
 
 function App() {
   return (
-    <AuthProvider>
-      <Router>
-        <div className="d-flex flex-column min-vh-100">
-          
-          {/* Global Header Navigation */}
-          <Header />
-          
-          {/* Main Routing Body */}
-          <div className="flex-grow-1">
-            <Routes>
-              {/* Public Routes */}
-              <Route path="/" element={<LandingPage />} />
-              <Route path="/about" element={<AboutPage />} />
-              <Route path="/login" element={<LoginPage />} />
-              <Route path="/register" element={<RegisterPage />} />
-              <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-              <Route path="/reset-password" element={<ResetPasswordPage />} />
+    <Router>
+      <div className="d-flex flex-column min-vh-100 bg-slate text-light">
+        {/* Navigation Bar */}
+        <Navbar />
 
-              {/* Protected Routes (Authentications Required) */}
-              <Route 
-                path="/dashboard" 
-                element={
-                  <ProtectedRoute>
-                    <Dashboard />
-                  </ProtectedRoute>
-                } 
-              />
-              <Route 
-                path="/courses" 
-                element={
-                  <ProtectedRoute>
-                    <Courses />
-                  </ProtectedRoute>
-                } 
-              />
-              <Route 
-                path="/notes" 
-                element={
-                  <ProtectedRoute>
-                    <Notes />
-                  </ProtectedRoute>
-                } 
-              />
-              <Route 
-                path="/projects" 
-                element={
-                  <ProtectedRoute>
-                    <Projects />
-                  </ProtectedRoute>
-                } 
-              />
-              <Route 
-                path="/jobs" 
-                element={
-                  <ProtectedRoute>
-                    <Jobs />
-                  </ProtectedRoute>
-                } 
-              />
-              <Route 
-                path="/profile" 
-                element={
-                  <ProtectedRoute>
-                    <Profile />
-                  </ProtectedRoute>
-                } 
-              />
+        {/* Primary Page Layout */}
+        <main className="flex-grow-1">
+          <Routes>
+            {/* Public Access Routes */}
+            <Route path="/" element={<Home />} />
+            <Route path="/about" element={<About />} />
+            <Route path="/login" element={<Login />} />
+            <Route path="/register" element={<Register />} />
 
-              {/* Fallback Redirection */}
-              <Route path="*" element={<Navigate to="/" replace />} />
-            </Routes>
-          </div>
+            {/* Authenticated Student/Admin Shared Routes */}
+            <Route 
+              path="/dashboard" 
+              element={
+                <ProtectedRoute allowedRoles={['student', 'admin']}>
+                  <Dashboard />
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="/courses" 
+              element={
+                <ProtectedRoute allowedRoles={['student', 'admin']}>
+                  <Courses />
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="/notes" 
+              element={
+                <ProtectedRoute allowedRoles={['student', 'admin']}>
+                  <Notes />
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="/jobs" 
+              element={
+                <ProtectedRoute allowedRoles={['student', 'admin']}>
+                  <Jobs />
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="/internships" 
+              element={
+                <ProtectedRoute allowedRoles={['student', 'admin']}>
+                  <Internships />
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="/projects" 
+              element={
+                <ProtectedRoute allowedRoles={['student', 'admin']}>
+                  <Projects />
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="/placement" 
+              element={
+                <ProtectedRoute allowedRoles={['student', 'admin']}>
+                  <PlacementPrep />
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="/profile" 
+              element={
+                <ProtectedRoute allowedRoles={['student', 'admin']}>
+                  <Profile />
+                </ProtectedRoute>
+              } 
+            />
 
-          {/* Global Footer Layout */}
-          <Footer />
+            {/* Restricted Administrative Controller Route */}
+            <Route 
+              path="/admin" 
+              element={
+                <ProtectedRoute allowedRoles={['admin']}>
+                  <AdminPanel />
+                </ProtectedRoute>
+              } 
+            />
 
-        </div>
-      </Router>
-    </AuthProvider>
+            {/* Catch-all Fallback redirection */}
+            <Route path="*" element={<Home />} />
+          </Routes>
+        </main>
+
+        {/* Ecosystem Footer */}
+        <Footer />
+      </div>
+    </Router>
   );
 }
 

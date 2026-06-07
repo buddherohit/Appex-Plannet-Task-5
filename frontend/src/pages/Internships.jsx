@@ -1,37 +1,34 @@
 import React, { useState, useEffect } from 'react';
 import api from '../helpers/api';
 
-const Jobs = () => {
-  const [jobs, setJobs] = useState([]);
+const Internships = () => {
+  const [internships, setInternships] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [location, setLocation] = useState('All');
-  const [jobType, setJobType] = useState('All');
-  
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
   // Apply Modal states
-  const [applyItem, setApplyItem] = useState(null); // job object currently being applied to
+  const [applyItem, setApplyItem] = useState(null); // the internship currently being applied to
   const [resumeFile, setResumeFile] = useState(null);
   const [applying, setApplying] = useState(false);
 
-  const locations = ['All', 'Remote', 'Bangalore, India', 'Noida, India', 'San Francisco, CA', 'Hybrid (Dallas, TX)'];
-  const jobTypes = ['All', 'Full-time', 'Part-time', 'Contract', 'Remote', 'Hybrid'];
+  const locations = ['All', 'Remote', 'Bangalore, India', 'Noida, India', 'New York, NY', 'San Francisco, CA'];
 
-  const fetchJobs = async () => {
+  const fetchInternships = async () => {
     setLoading(true);
     setError('');
     try {
-      const response = await api.get('/jobs.php', {
-        params: { search, location, job_type: jobType }
+      const response = await api.get('/internships.php', {
+        params: { search, location }
       });
       if (response.data.success) {
-        setJobs(response.data.jobs);
+        setInternships(response.data.internships);
       }
     } catch (err) {
       console.error(err);
-      setError('Failed to load jobs postings.');
+      setError('Failed to load internships catalog.');
     } finally {
       setLoading(false);
     }
@@ -39,16 +36,16 @@ const Jobs = () => {
 
   useEffect(() => {
     const delayDebounceFn = setTimeout(() => {
-      fetchJobs();
+      fetchInternships();
     }, 300);
     return () => clearTimeout(delayDebounceFn);
-  }, [search, location, jobType]);
+  }, [search, location]);
 
   const handleFileChange = (e) => {
     const file = e.target.files[0];
     if (file) {
       if (file.size > 5 * 1024 * 1024) {
-        setError('Resume file exceeds 5MB size limit.');
+        setError('Resume size too large. Max 5MB allowed.');
         return;
       }
       const ext = file.name.split('.').pop().toLowerCase();
@@ -72,7 +69,7 @@ const Jobs = () => {
     setSuccess('');
 
     const formData = new FormData();
-    formData.append('type', 'job');
+    formData.append('type', 'internship');
     formData.append('post_id', applyItem.id);
     formData.append('resume', resumeFile);
 
@@ -82,6 +79,7 @@ const Jobs = () => {
         setSuccess(`Application submitted successfully for ${applyItem.title} at ${applyItem.company}!`);
         setApplyItem(null);
         setResumeFile(null);
+        // Clear message after 3 seconds
         setTimeout(() => setSuccess(''), 4000);
       }
     } catch (err) {
@@ -95,21 +93,21 @@ const Jobs = () => {
     <div className="container py-5">
       <div className="text-center mb-5">
         <span className="badge bg-secondary bg-opacity-25 border border-secondary text-white px-3 py-2 badge-custom mb-3">
-          💼 Placement Job Board
+          💼 Internship Portal
         </span>
-        <h1 className="fw-extrabold text-white mb-2">Explore Job Postings</h1>
+        <h1 className="fw-extrabold text-white mb-2">Explore Internships</h1>
         <p className="text-secondary mx-auto mb-0" style={{ maxWidth: '600px' }}>
-          Discover full-time, remote, or hybrid career opportunities with partner hiring organizations.
+          Kickstart your career path with industry-level internship postings from tech and marketing companies globally.
         </p>
       </div>
 
       {success && <div className="alert alert-success border-0 bg-success bg-opacity-25 text-white py-2 small mb-4">{success}</div>}
       {error && <div className="alert alert-danger border-0 bg-danger bg-opacity-25 text-white py-2 small mb-4">{error}</div>}
 
-      {/* Filter Headers */}
+      {/* Filter Options */}
       <div className="glass-card-no-hover p-4 mb-5">
         <div className="row g-3">
-          <div className="col-lg-5">
+          <div className="col-md-7">
             <div className="input-group">
               <span className="input-group-text bg-transparent border-secondary text-secondary border-end-0">
                 <i className="bi bi-search"></i>
@@ -119,12 +117,11 @@ const Jobs = () => {
                 value={search} 
                 onChange={(e) => setSearch(e.target.value)} 
                 className="form-control form-control-custom text-white border-start-0" 
-                placeholder="Search positions, companies..." 
+                placeholder="Search positions, companies, or requirements..." 
               />
             </div>
           </div>
-          
-          <div className="col-md-6 col-lg-3">
+          <div className="col-md-5">
             <div className="d-flex align-items-center gap-2">
               <span className="text-secondary small text-nowrap">Location:</span>
               <select 
@@ -138,21 +135,6 @@ const Jobs = () => {
               </select>
             </div>
           </div>
-
-          <div className="col-md-6 col-lg-4">
-            <div className="d-flex align-items-center gap-2">
-              <span className="text-secondary small text-nowrap">Job Type:</span>
-              <select 
-                value={jobType} 
-                onChange={(e) => setJobType(e.target.value)} 
-                className="form-select form-control-custom bg-dark text-white"
-              >
-                {jobTypes.map((type, i) => (
-                  <option key={i} value={type}>{type}</option>
-                ))}
-              </select>
-            </div>
-          </div>
         </div>
       </div>
 
@@ -162,38 +144,33 @@ const Jobs = () => {
             <span className="visually-hidden">Loading...</span>
           </div>
         </div>
-      ) : jobs.length === 0 ? (
+      ) : internships.length === 0 ? (
         <div className="text-center text-muted py-5">
-          <i className="bi bi-briefcase-fill fs-1 d-block mb-3 text-secondary"></i>
-          No job postings found matching your filters.
+          <i className="bi bi-briefcase fs-1 d-block mb-3 text-secondary"></i>
+          No internship postings found.
         </div>
       ) : (
         <div className="row g-4">
-          {jobs.map((job) => (
-            <div className="col-lg-6" key={job.id}>
+          {internships.map((intern) => (
+            <div className="col-lg-6" key={intern.id}>
               <div className="glass-card p-4 h-100 d-flex flex-column justify-content-between">
                 <div>
                   <div className="d-flex justify-content-between align-items-start mb-3">
                     <div>
-                      <h5 className="fw-bold text-white mb-0">{job.title}</h5>
-                      <span className="text-primary small fw-semibold">{job.company}</span>
+                      <h5 className="fw-bold text-white mb-0">{intern.title}</h5>
+                      <span className="text-primary small fw-semibold">{intern.company}</span>
                     </div>
-                    <div className="d-flex gap-2">
-                      <span className="badge bg-secondary bg-opacity-25 text-white border border-secondary badge-custom">
-                        {job.location}
-                      </span>
-                      <span className="badge bg-primary bg-opacity-25 text-primary border border-primary badge-custom">
-                        {job.job_type}
-                      </span>
-                    </div>
+                    <span className="badge bg-secondary bg-opacity-25 text-white border border-secondary badge-custom">
+                      <i className="bi bi-geo-alt me-1 text-primary"></i>{intern.location}
+                    </span>
                   </div>
 
-                  <p className="text-secondary small mb-3">{job.description}</p>
+                  <p className="text-secondary small mb-3">{intern.description}</p>
                   
                   <div className="mb-4">
                     <strong className="text-white small d-block mb-2">Requirements:</strong>
                     <div className="d-flex flex-wrap gap-1">
-                      {job.requirements.split(',').map((req, i) => (
+                      {intern.requirements.split(',').map((req, i) => (
                         <span key={i} className="badge bg-dark border border-secondary text-secondary badge-custom py-1 px-2">
                           {req.trim()}
                         </span>
@@ -205,17 +182,21 @@ const Jobs = () => {
                 <div className="border-top border-secondary border-opacity-25 pt-3 d-flex align-items-center justify-content-between">
                   <div className="d-flex gap-4">
                     <div>
-                      <small className="text-muted d-block" style={{ fontSize: '0.75rem' }}>Salary Bracket</small>
-                      <span className="text-success small fw-bold">{job.salary}</span>
+                      <small className="text-muted d-block" style={{ fontSize: '0.75rem' }}>Stipend</small>
+                      <span className="text-success small fw-bold">{intern.stipend}</span>
+                    </div>
+                    <div>
+                      <small className="text-muted d-block" style={{ fontSize: '0.75rem' }}>Duration</small>
+                      <span className="text-white small fw-semibold">{intern.duration}</span>
                     </div>
                     <div>
                       <small className="text-muted d-block" style={{ fontSize: '0.75rem' }}>Apply Before</small>
-                      <span className="text-danger small fw-semibold">{new Date(job.deadline).toLocaleDateString()}</span>
+                      <span className="text-danger small fw-semibold">{new Date(intern.deadline).toLocaleDateString()}</span>
                     </div>
                   </div>
 
                   <button 
-                    onClick={() => { setApplyItem(job); setError(''); }} 
+                    onClick={() => { setApplyItem(intern); setError(''); }} 
                     className="btn btn-primary-custom btn-sm px-3"
                   >
                     Apply Now
@@ -227,19 +208,19 @@ const Jobs = () => {
         </div>
       )}
 
-      {/* Application Resume Modal */}
+      {/* Application Form Modal */}
       {applyItem && (
         <div className="modal show d-block" style={{ background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)' }} tabIndex="-1">
           <div className="modal-dialog modal-dialog-centered">
             <div className="modal-content glass-card-no-hover border-secondary text-white">
               <div className="modal-header border-secondary p-4">
-                <h5 className="modal-title fw-bold">Apply for Job Position</h5>
+                <h5 className="modal-title fw-bold">Apply for Position</h5>
                 <button type="button" onClick={() => setApplyItem(null)} className="btn-close btn-close-white"></button>
               </div>
               <form onSubmit={handleApplySubmit}>
                 <div className="modal-body p-4">
                   <p className="text-secondary small mb-3">
-                    You are submitting an application for <strong>{applyItem.title}</strong> at <strong>{applyItem.company}</strong>.
+                    You are applying to <strong>{applyItem.title}</strong> at <strong>{applyItem.company}</strong>.
                   </p>
                   
                   {error && <div className="alert alert-danger border-0 bg-danger bg-opacity-25 text-white py-2 small mb-3">{error}</div>}
@@ -272,4 +253,4 @@ const Jobs = () => {
   );
 };
 
-export default Jobs;
+export default Internships;

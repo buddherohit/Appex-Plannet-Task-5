@@ -1,287 +1,355 @@
-// frontend/src/pages/Profile.jsx
 import React, { useState, useEffect } from 'react';
-import { useAuth } from '../context/AuthContext';
-import Sidebar from '../components/Sidebar';
-import api, { API_BASE_URL } from '../services/api';
+import api from '../helpers/api';
 
 const Profile = () => {
-  const { user, updateProfile, changePassword } = useAuth();
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-
-  // Profile fields state
-  const [fullName, setFullName] = useState('');
-  const [email, setEmail] = useState('');
-  const [mobile, setMobile] = useState('');
-  const [profileImageFile, setProfileImageFile] = useState(null);
+  const [user, setUser] = useState(JSON.parse(localStorage.getItem('careerbridge_user') || '{}'));
+  const [profileForm, setProfileForm] = useState({ name: user.name || '', email: user.email || '' });
   
-  // Password state
-  const [currentPassword, setCurrentPassword] = useState('');
-  const [newPassword, setNewPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
+  // Password change states
+  const [pwdForm, setPwdForm] = useState({ current_password: '', new_password: '', confirm_password: '' });
+  
+  // Avatar upload states
+  const [avatarFile, setAvatarFile] = useState(null);
+  const [avatarPreview, setAvatarPreview] = useState('');
 
-  // Status state
-  const [detailsLoading, setDetailsLoading] = useState(false);
-  const [detailsSuccess, setDetailsSuccess] = useState('');
-  const [detailsError, setDetailsError] = useState('');
+  // Status logs
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+  const [activityLogs, setActivityLogs] = useState([]);
 
-  const [pwdLoading, setPwdLoading] = useState(false);
-  const [pwdSuccess, setPwdSuccess] = useState('');
-  const [pwdError, setPwdError] = useState('');
-
-  const toggleSidebar = () => setSidebarOpen(!sidebarOpen);
-
-  // Prefill details from auth context
-  useEffect(() => {
-    if (user) {
-      setFullName(user.full_name || '');
-      setEmail(user.email || '');
-      setMobile(user.mobile || '');
-    }
-  }, [user]);
-
-  // Update profile details handler
-  const handleDetailsSubmit = async (e) => {
-    e.preventDefault();
-    setDetailsError('');
-    setDetailsSuccess('');
-
-    if (!fullName || !email || !mobile) {
-      setDetailsError("Please fill in all general details.");
-      return;
-    }
-
-    setDetailsLoading(true);
-
-    const formData = new FormData();
-    formData.append('full_name', fullName);
-    formData.append('email', email);
-    formData.append('mobile', mobile);
-    
-    if (profileImageFile) {
-      formData.append('profile_image', profileImageFile);
-    }
-
-    const result = await updateProfile(formData);
-    setDetailsLoading(false);
-
-    if (result.success) {
-      setDetailsSuccess(result.message || "Profile details updated successfully!");
-      setProfileImageFile(null); // Reset file input
-      // Clear success message after 4 seconds
-      setTimeout(() => setDetailsSuccess(''), 4000);
-    } else {
-      setDetailsError(result.message || "Failed to update profile details.");
+  const loadProfileData = async () => {
+    try {
+      const meRes = await api.get('/auth.php?action=me');
+      if (meRes.data.success) {
+        setUser(meRes.data.user);
+        localStorage.setItem('careerbridge_user', JSON.stringify(meRes.data.user));
+        setProfileForm({ name: meRes.data.user.name, email: meRes.data.user.email });
+      }
+      
+      const logsRes = await api.get('/activity_logs.php');
+      if (logsRes.data.success) {
+        setActivityLogs(logsRes.data.logs.slice(0, 10));
+      }
+    } catch (err) {
+      console.error(err);
     }
   };
 
-  // Change password handler
+  useEffect(() => {
+    loadProfileData();
+  }, []);
+
+  const handleProfileChange = (e) => {
+    setProfileForm({ ...profileForm, [e.target.name]: e.target.value });
+  };
+
+  const handlePwdChange = (e) => {
+    setPwdForm({ ...pwdForm, [e.target.name]: e.target.value });
+  };
+
+  const handleProfileSubmit = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setError('');
+    setSuccess('');
+    try {
+      const res = await api.post('/profile.php?action=update', profileForm);
+      if (res.data.success) {
+        setSuccess('Profile details updated successfully.');
+        const updatedUser = { ...user, name: profileForm.name, email: profileForm.email };
+        setUser(updatedUser);
+        localStorage.setItem('careerbridge_user', JSON.stringify(updatedUser));
+        window.dispatchEvent(new Event('auth-change'));
+        loadProfileData();
+      }
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to update profile.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handlePasswordSubmit = async (e) => {
     e.preventDefault();
-    setPwdError('');
-    setPwdSuccess('');
+    setLoading(true);
+    setError('');
+    setSuccess('');
 
-    if (!currentPassword || !newPassword || !confirmPassword) {
-      setPwdError("Please fill in all password fields.");
+    if (pwdForm.new_password !== pwdForm.confirm_password) {
+      setError('New password and password confirmation do not match.');
+      setLoading(false);
       return;
     }
 
-    if (newPassword !== confirmPassword) {
-      setPwdError("New passwords do not match.");
+    if (pwdForm.new_password.length < 6) {
+      setError('New password must be at least 6 characters.');
+      setLoading(false);
       return;
     }
 
-    if (newPassword.length < 6) {
-      setPwdError("New password must be at least 6 characters.");
-      return;
-    }
+    try {
+      const res = await api.post('/profile.php?action=change-password', {
+        current_password: pwdForm.current_password,
+        new_password: pwdForm.new_password
+      });
 
-    setPwdLoading(true);
-    const result = await changePassword(currentPassword, newPassword);
-    setPwdLoading(false);
-
-    if (result.success) {
-      setPwdSuccess(result.message || "Password changed successfully!");
-      setCurrentPassword('');
-      setNewPassword('');
-      setConfirmPassword('');
-      setTimeout(() => setPwdSuccess(''), 4000);
-    } else {
-      setPwdError(result.message || "Failed to update password.");
+      if (res.data.success) {
+        setSuccess(res.data.message);
+        setPwdForm({ current_password: '', new_password: '', confirm_password: '' });
+        loadProfileData();
+      }
+    } catch (err) {
+      setError(err.response?.data?.message || 'Password update failed.');
+    } finally {
+      setLoading(false);
     }
   };
 
-  // Resolve profile image URL
-  const getAvatarUrl = () => {
-    if (user && user.profile_image) {
-      return `${API_BASE_URL}/${user.profile_image}`;
+  const handleFileChange = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      // Validate file size (2MB)
+      if (file.size > 2 * 1024 * 1024) {
+        setError('Avatar file exceeds 2MB limit.');
+        return;
+      }
+      // Validate file extension
+      const ext = file.name.split('.').pop().toLowerCase();
+      if (!['png', 'jpg', 'jpeg'].includes(ext)) {
+        setError('Invalid image type. Only JPG, JPEG, and PNG are allowed.');
+        return;
+      }
+
+      setAvatarFile(file);
+      setError('');
+      
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setAvatarPreview(reader.result);
+      };
+      reader.readAsDataURL(file);
     }
-    return null;
+  };
+
+  const handleAvatarUpload = async () => {
+    if (!avatarFile) return;
+    setLoading(true);
+    setError('');
+    setSuccess('');
+
+    const formData = new FormData();
+    formData.append('avatar', avatarFile);
+
+    try {
+      const res = await api.post('/profile.php?action=upload-avatar', formData);
+      if (res.data.success) {
+        setSuccess('Avatar photo updated successfully!');
+        setAvatarFile(null);
+        setAvatarPreview('');
+        
+        const updatedUser = { ...user, profile_pic: res.data.profile_pic };
+        setUser(updatedUser);
+        localStorage.setItem('careerbridge_user', JSON.stringify(updatedUser));
+        window.dispatchEvent(new Event('auth-change'));
+        loadProfileData();
+      }
+    } catch (err) {
+      setError(err.response?.data?.message || 'Error uploading profile image.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
-    <div className="d-flex min-vh-100" style={{ paddingTop: '80px' }}>
-      
-      <Sidebar isOpen={sidebarOpen} toggleSidebar={toggleSidebar} />
+    <div className="container py-5">
+      <div className="mb-4">
+        <h2 className="fw-bold text-white mb-1"><i className="bi bi-person-fill text-primary me-2"></i>My Profile</h2>
+        <p className="text-secondary mb-0">Update your credentials, upload verification avatars, and track your activity logs.</p>
+      </div>
 
-      <div className="main-content">
-        
-        {/* Toggle Mobile Sidebar */}
-        <div className="d-lg-none mb-3">
-          <button onClick={toggleSidebar} className="btn btn-primary-custom d-flex align-items-center gap-2">
-            <i className="bi bi-list"></i> Menu
-          </button>
-        </div>
+      {error && <div className="alert alert-danger border-0 bg-danger bg-opacity-25 text-white py-2 small mb-4">{error}</div>}
+      {success && <div className="alert alert-success border-0 bg-success bg-opacity-25 text-white py-2 small mb-4">{success}</div>}
 
-        {/* Heading */}
-        <div className="mb-4">
-          <h1 className="fw-bold mb-1 text-main-color">Profile Settings</h1>
-          <p className="text-muted mb-0">Manage your contact credentials and credentials passwords</p>
-        </div>
-
-        <div className="row g-4">
+      <div className="row g-4">
+        {/* Left Side: Avatar Upload & Details Form */}
+        <div className="col-lg-8">
           
-          {/* 1. Account Details Form */}
-          <div className="col-lg-7">
-            <div className="glass-card p-4 p-md-5 h-100">
-              <h4 className="fw-bold text-main-color mb-4"><i className="bi bi-person-badge-fill text-primary me-2"></i>Personal Details</h4>
-
-              {detailsSuccess && <div className="alert alert-success border-0 mb-3">{detailsSuccess}</div>}
-              {detailsError && <div className="alert alert-danger border-0 mb-3">{detailsError}</div>}
-
-              <form onSubmit={handleDetailsSubmit}>
-                {/* Profile photo view & upload */}
-                <div className="d-flex align-items-center gap-4 mb-4">
-                  <div>
-                    {getAvatarUrl() ? (
-                      <img 
-                        src={getAvatarUrl()} 
-                        alt={user?.full_name} 
-                        className="rounded-circle object-fit-cover shadow border border-primary border-3" 
-                        style={{ width: '90px', height: '90px' }}
-                      />
-                    ) : (
-                      <div 
-                        className="rounded-circle text-white d-flex align-items-center justify-content-center fw-bold shadow border border-primary border-3" 
-                        style={{ width: '90px', height: '90px', fontSize: '2.5rem', backgroundColor: 'var(--primary-color)' }}
-                      >
-                        {user?.full_name?.charAt(0).toUpperCase()}
-                      </div>
-                    )}
-                  </div>
-                  <div>
-                    <label className="form-label fw-semibold mb-1">Update Profile Picture</label>
-                    <input 
-                      type="file" 
-                      className="form-control form-control-sm" 
-                      accept="image/*"
-                      onChange={(e) => setProfileImageFile(e.target.files[0])}
-                    />
-                    <small className="text-muted">JPG, PNG or WEBP formats. Size limit: 3MB.</small>
-                  </div>
-                </div>
-
-                {/* Name */}
-                <div className="mb-3">
-                  <label className="form-label fw-semibold">Full Name</label>
+          {/* Details Form Card */}
+          <div className="glass-card p-4 mb-4">
+            <h5 className="fw-semibold text-white mb-4"><i className="bi bi-card-text text-primary me-2"></i>Account Details</h5>
+            <form onSubmit={handleProfileSubmit}>
+              <div className="row g-3 mb-3">
+                <div className="col-md-6">
+                  <label className="form-label text-white small">Full Name</label>
                   <input 
                     type="text" 
-                    className="form-control" 
-                    value={fullName}
-                    onChange={(e) => setFullName(e.target.value)}
-                    required
+                    name="name" 
+                    value={profileForm.name} 
+                    onChange={handleProfileChange} 
+                    className="form-control form-control-custom text-white" 
+                    required 
                   />
                 </div>
-
-                {/* Email */}
-                <div className="mb-3">
-                  <label className="form-label fw-semibold">Email Address</label>
+                <div className="col-md-6">
+                  <label className="form-label text-white small">Email Address</label>
                   <input 
                     type="email" 
-                    className="form-control" 
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    required
+                    name="email" 
+                    value={profileForm.email} 
+                    onChange={handleProfileChange} 
+                    className="form-control form-control-custom text-white" 
+                    required 
                   />
                 </div>
+              </div>
+              
+              <div className="mb-3">
+                <label className="form-label text-white small">Account Role</label>
+                <input 
+                  type="text" 
+                  value={user.role} 
+                  className="form-control form-control-custom text-muted text-capitalize bg-dark bg-opacity-50 border-secondary" 
+                  disabled 
+                />
+                <small className="text-muted">Role modification is restricted to platform administrators.</small>
+              </div>
 
-                {/* Mobile number */}
-                <div className="mb-4">
-                  <label className="form-label fw-semibold">Mobile Number</label>
-                  <input 
-                    type="tel" 
-                    className="form-control" 
-                    value={mobile}
-                    onChange={(e) => setMobile(e.target.value)}
-                    pattern="[0-9]{10}"
-                    title="10 digit phone number"
-                    required
-                  />
-                </div>
-
-                <button type="submit" className="btn btn-primary-custom w-100 py-2 btn-sm" disabled={detailsLoading}>
-                  {detailsLoading ? <span className="spinner-border spinner-border-sm"></span> : 'Update Profile Details'}
-                </button>
-              </form>
-            </div>
+              <button type="submit" disabled={loading} className="btn btn-primary-custom px-4 py-2 mt-2">
+                {loading ? 'Saving...' : 'Save Profile Details'}
+              </button>
+            </form>
           </div>
 
-          {/* 2. Password Reset Form */}
-          <div className="col-lg-5">
-            <div className="glass-card p-4 p-md-5 h-100">
-              <h4 className="fw-bold text-main-color mb-4"><i className="bi bi-shield-lock-fill text-primary me-2"></i>Change Password</h4>
+          {/* Password update Form */}
+          <div className="glass-card p-4">
+            <h5 className="fw-semibold text-white mb-4"><i className="bi bi-shield-lock-fill text-warning me-2"></i>Security Settings</h5>
+            <form onSubmit={handlePasswordSubmit}>
+              <div className="mb-3">
+                <label className="form-label text-white small">Current Password</label>
+                <input 
+                  type="password" 
+                  name="current_password" 
+                  value={pwdForm.current_password} 
+                  onChange={handlePwdChange} 
+                  className="form-control form-control-custom text-white" 
+                  placeholder="••••••••" 
+                  required 
+                />
+              </div>
 
-              {pwdSuccess && <div className="alert alert-success border-0 mb-3">{pwdSuccess}</div>}
-              {pwdError && <div className="alert alert-danger border-0 mb-3">{pwdError}</div>}
-
-              <form onSubmit={handlePasswordSubmit}>
-                {/* Current password */}
-                <div className="mb-3">
-                  <label className="form-label fw-semibold">Current Password</label>
+              <div className="row g-3 mb-3">
+                <div className="col-md-6">
+                  <label className="form-label text-white small">New Password</label>
                   <input 
                     type="password" 
-                    className="form-control" 
-                    value={currentPassword}
-                    onChange={(e) => setCurrentPassword(e.target.value)}
-                    placeholder="Enter current password"
-                    required
+                    name="new_password" 
+                    value={pwdForm.new_password} 
+                    onChange={handlePwdChange} 
+                    className="form-control form-control-custom text-white" 
+                    placeholder="••••••••" 
+                    required 
                   />
                 </div>
-
-                {/* New password */}
-                <div className="mb-3">
-                  <label className="form-label fw-semibold">New Password</label>
+                <div className="col-md-6">
+                  <label className="form-label text-white small">Confirm New Password</label>
                   <input 
                     type="password" 
-                    className="form-control" 
-                    value={newPassword}
-                    onChange={(e) => setNewPassword(e.target.value)}
-                    placeholder="Create new password"
-                    required
+                    name="confirm_password" 
+                    value={pwdForm.confirm_password} 
+                    onChange={handlePwdChange} 
+                    className="form-control form-control-custom text-white" 
+                    placeholder="••••••••" 
+                    required 
                   />
                 </div>
+              </div>
 
-                {/* Confirm new password */}
-                <div className="mb-4">
-                  <label className="form-label fw-semibold">Confirm New Password</label>
-                  <input 
-                    type="password" 
-                    className="form-control" 
-                    value={confirmPassword}
-                    onChange={(e) => setConfirmPassword(e.target.value)}
-                    placeholder="Confirm new password"
-                    required
-                  />
-                </div>
-
-                <button type="submit" className="btn btn-primary-custom w-100 py-2 btn-sm" disabled={pwdLoading}>
-                  {pwdLoading ? <span className="spinner-border spinner-border-sm"></span> : 'Change Account Password'}
-                </button>
-              </form>
-            </div>
+              <button type="submit" disabled={loading} className="btn btn-secondary-custom px-4 py-2 mt-2">
+                {loading ? 'Updating...' : 'Update Password'}
+              </button>
+            </form>
           </div>
 
         </div>
 
+        {/* Right Side: Profile Photo Upload Widget & Timeline */}
+        <div className="col-lg-4">
+          
+          {/* Avatar Panel */}
+          <div className="glass-card p-4 mb-4 text-center">
+            <h6 className="fw-bold text-white mb-3 text-start">Profile Photo</h6>
+            
+            {avatarPreview ? (
+              <img 
+                src={avatarPreview} 
+                alt="Preview" 
+                className="rounded-circle object-fit-cover border border-secondary mx-auto mb-3"
+                style={{ width: '120px', height: '120px' }}
+              />
+            ) : user.profile_pic ? (
+              <img 
+                src={`http://localhost:8000/${user.profile_pic}`} 
+                alt="Avatar" 
+                className="rounded-circle object-fit-cover border border-secondary mx-auto mb-3"
+                style={{ width: '120px', height: '120px' }}
+                onError={(e) => {
+                  e.target.onerror = null;
+                  e.target.src = "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop";
+                }}
+              />
+            ) : (
+              <div className="rounded-circle bg-primary d-flex align-items-center justify-content-center text-white border border-secondary mx-auto mb-3" style={{ width: '120px', height: '120px', fontSize: '3rem' }}>
+                {user.name ? user.name.charAt(0).toUpperCase() : 'C'}
+              </div>
+            )}
+
+            <div className="mb-3">
+              <label className="btn btn-outline-light border-secondary text-white btn-sm px-3 py-2 w-100">
+                <i className="bi bi-camera me-1"></i> Choose New Photo
+                <input 
+                  type="file" 
+                  onChange={handleFileChange} 
+                  accept=".jpg,.jpeg,.png"
+                  className="d-none" 
+                />
+              </label>
+              <small className="text-muted d-block mt-2">Maximum file size: 2MB. Allowed: JPG, PNG.</small>
+            </div>
+
+            {avatarFile && (
+              <button 
+                onClick={handleAvatarUpload} 
+                disabled={loading} 
+                className="btn btn-success btn-sm w-100"
+              >
+                {loading ? 'Uploading...' : 'Save Avatar Photo'}
+              </button>
+            )}
+          </div>
+
+          {/* User Specific Timeline logs */}
+          <div className="glass-card p-4">
+            <h6 className="fw-bold text-white mb-3"><i className="bi bi-clock-history me-1 text-info"></i>My Activity Feed</h6>
+            {activityLogs.length === 0 ? (
+              <p className="text-muted small text-center py-2">No activity recorded.</p>
+            ) : (
+              <div className="d-flex flex-column gap-3" style={{ maxHeight: '300px', overflowY: 'auto' }}>
+                {activityLogs.map((log) => (
+                  <div key={log.id} className="d-flex gap-2">
+                    <div className="mt-1"><i className="bi bi-check-circle-fill text-success" style={{ fontSize: '0.8rem' }}></i></div>
+                    <div>
+                      <span className="text-white d-block small fw-semibold" style={{ lineHeight: '1.2' }}>{log.action}</span>
+                      <span className="text-secondary text-xxs d-block">{log.details}</span>
+                      <small className="text-muted text-xxs" style={{ fontSize: '0.7rem' }}>{new Date(log.created_at).toLocaleDateString()}</small>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+        </div>
       </div>
     </div>
   );

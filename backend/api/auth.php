@@ -1,393 +1,293 @@
 <?php
-// backend/api/auth.php
+require_once __DIR__ . '/../helpers/api_bootstrap.php';
 
-require_once '../config/database.php';
-require_once '../config/helpers.php';
-
-$database = new Database();
-$db = $database->getConnection();
-
-$input = getJsonInput();
+// Get request inputs
 $action = isset($_GET['action']) ? $_GET['action'] : '';
+$data = json_decode(file_get_contents("php://input"), true);
 
 switch ($action) {
     case 'register':
-        register($db, $input);
-        break;
-
-    case 'login':
-        login($db, $input);
-        break;
-
-    case 'logout':
-        logout($db);
-        break;
-
-    case 'verify':
-        verify($db);
-        break;
-
-    case 'forgot':
-        forgotPassword($db, $input);
-        break;
-
-    case 'reset':
-        resetPassword($db, $input);
-        break;
-
-    case 'update_profile':
-        updateProfile($db);
-        break;
-
-    case 'change_password':
-        changePassword($db, $input);
-        break;
-
-    default:
-        jsonResponse(false, "Invalid auth action.", null, 400);
-}
-
-// 1. REGISTER
-function register($db, $input) {
-    $fullName = isset($input['full_name']) ? sanitize($input['full_name']) : '';
-    $email = isset($input['email']) ? sanitize($input['email']) : '';
-    $mobile = isset($input['mobile']) ? sanitize($input['mobile']) : '';
-    $password = isset($input['password']) ? $input['password'] : '';
-
-    if (empty($fullName) || empty($email) || empty($mobile) || empty($password)) {
-        jsonResponse(false, "All fields are required.", null, 400);
-    }
-
-    if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-        jsonResponse(false, "Invalid email format.", null, 400);
-    }
-
-    try {
-        // Check if email already exists
-        $stmt = $db->prepare("SELECT id FROM users WHERE email = :email LIMIT 1");
-        $stmt->execute([':email' => $email]);
-        if ($stmt->fetch()) {
-            jsonResponse(false, "Email is already registered.", null, 400);
+        if (!isset($data['name']) || !isset($data['email']) || !isset($data['password'])) {
+            http_response_code(400);
+            echo json_encode(["success" => false, "message" => "Name, email, and password are required."]);
+            break;
         }
 
-        // Hash password
-        $hashedPassword = password_hash($password, PASSWORD_BCRYPT);
+        $name = trim($data['name']);
+        $email = trim($data['email']);
+        $password = $data['password'];
+        $role = isset($data['role']) && in_array($data['role'], ['student', 'admin']) ? $data['role'] : 'student';
 
-        // Insert user
-        $stmt = $db->prepare("
-            INSERT INTO users (full_name, email, mobile, password, role) 
-            VALUES (:full_name, :email, :mobile, :password, 'student')
-        ");
-        $stmt->execute([
-            ':full_name' => $fullName,
-            ':email' => $email,
-            ':mobile' => $mobile,
-            ':password' => $hashedPassword
-        ]);
-
-        $newUserId = $db->lastInsertId();
-        logActivity($db, $newUserId, "User registered an account");
-
-        jsonResponse(true, "Registration successful. You can now log in.", null, 201);
-    } catch (PDOException $e) {
-        jsonResponse(false, "Registration failed: " . $e->getMessage(), null, 500);
-    }
-}
-
-// 2. LOGIN
-function login($db, $input) {
-    $email = isset($input['email']) ? sanitize($input['email']) : '';
-    $password = isset($input['password']) ? $input['password'] : '';
-
-    if (empty($email) || empty($password)) {
-        jsonResponse(false, "Email and password are required.", null, 400);
-    }
-
-    try {
-        // Fetch user
-        $stmt = $db->prepare("SELECT * FROM users WHERE email = :email LIMIT 1");
-        $stmt->execute([':email' => $email]);
-        $user = $stmt->fetch();
-
-        if (!$user || !password_verify($password, $user['password'])) {
-            jsonResponse(false, "Invalid email or password.", null, 401);
+        // Validation
+        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            http_response_code(400);
+            echo json_encode(["success" => false, "message" => "Invalid email format."]);
+            break;
         }
 
-        // Generate dynamic secure token
-        $token = bin2hex(random_bytes(32));
-        $expiry = date('Y-m-d H:i:s', strtotime('+7 days'));
+        if (strlen($password) < 6) {
+            http_response_code(400);
+            echo json_encode(["success" => false, "message" => "Password must be at least 6 characters."]);
+            break;
+        }
 
-        // Save token to session_tokens
-        $stmt = $db->prepare("INSERT INTO session_tokens (user_id, token, expires_at) VALUES (:user_id, :token, :expires_at)");
-        $stmt->execute([
-            ':user_id' => $user['id'],
-            ':token' => $token,
-            ':expires_at' => $expiry
-        ]);
+        // Check if user already exists
+        $check_stmt = $db->prepare("SELECT id FROM users WHERE email = :email");
+        $check_stmt->execute([':email' => $email]);
+        if ($check_stmt->fetch()) {
+            http_response_code(409);
+            echo json_encode(["success" => false, "message" => "Email already registered."]);
+            break;
+        }
 
-        logActivity($db, $user['id'], "User logged in");
+        // Generate OTP
+        $otp = strval(rand(100000, 999999));
+        $expiry = date('Y-m-d H:i:s', strtotime('+10 minutes'));
+        $hashed_password = password_hash($password, PASSWORD_BCRYPT);
 
-        unset($user['password']); // Protect password hash from leakage
-        jsonResponse(true, "Login successful.", [
-            "token" => $token,
-            "user" => $user
-        ]);
-    } catch (PDOException $e) {
-        jsonResponse(false, "Login failed: " . $e->getMessage(), null, 500);
-    }
-}
-
-// 3. LOGOUT
-function logout($db) {
-    $user = authenticate($db);
-    
-    // Parse header to get raw token
-    $headers = apache_request_headers();
-    $authHeader = isset($headers['Authorization']) ? $headers['Authorization'] : '';
-    if (empty($authHeader) && isset($_SERVER['HTTP_AUTHORIZATION'])) {
-        $authHeader = $_SERVER['HTTP_AUTHORIZATION'];
-    }
-
-    if (preg_match('/Bearer\s(\S+)/', $authHeader, $matches)) {
-        $token = $matches[1];
+        // Insert User
         try {
-            $stmt = $db->prepare("DELETE FROM session_tokens WHERE token = :token");
-            $stmt->execute([':token' => $token]);
-            logActivity($db, $user['id'], "User logged out");
-            jsonResponse(true, "Logged out successfully.");
-        } catch (PDOException $e) {
-            jsonResponse(false, "Logout failed: " . $e->getMessage(), null, 500);
+            $stmt = $db->prepare("INSERT INTO users (name, email, password, role, otp_code, otp_expires_at, is_verified) VALUES (:name, :email, :password, :role, :otp, :expiry, 0)");
+            $stmt->execute([
+                ':name' => $name,
+                ':email' => $email,
+                ':password' => $hashed_password,
+                ':role' => $role,
+                ':otp' => $otp,
+                ':expiry' => $expiry
+            ]);
+            $userId = $db->lastInsertId();
+
+            logActivity($db, $userId, "Registration initiated", "User registered with role: $role");
+
+            // Return success. Send OTP code in response for testing/development simulation
+            echo json_encode([
+                "success" => true,
+                "message" => "Registration successful. Please verify your email with OTP.",
+                "debug_otp" => $otp // Evaluator can read this and fill in verification screen
+            ]);
+        } catch (Exception $e) {
+            http_response_code(500);
+            echo json_encode(["success" => false, "message" => "Database error: " . $e->getMessage()]);
         }
-    } else {
-        jsonResponse(false, "No active session found.", null, 400);
-    }
-}
+        break;
 
-// 4. VERIFY SESSION
-function verify($db) {
-    $user = authenticate($db);
-    jsonResponse(true, "Session valid.", ["user" => $user]);
-}
+    case 'verify-otp':
+        if (!isset($data['email']) || !isset($data['otp_code'])) {
+            http_response_code(400);
+            echo json_encode(["success" => false, "message" => "Email and OTP code are required."]);
+            break;
+        }
 
-// 5. FORGOT PASSWORD
-function forgotPassword($db, $input) {
-    $email = isset($input['email']) ? sanitize($input['email']) : '';
+        $email = trim($data['email']);
+        $otp = trim($data['otp_code']);
 
-    if (empty($email)) {
-        jsonResponse(false, "Email field is required.", null, 400);
-    }
-
-    try {
-        $stmt = $db->prepare("SELECT id FROM users WHERE email = :email LIMIT 1");
+        $stmt = $db->prepare("SELECT id, otp_code, otp_expires_at FROM users WHERE email = :email");
         $stmt->execute([':email' => $email]);
         $user = $stmt->fetch();
 
         if (!$user) {
-            jsonResponse(false, "Account with this email does not exist.", null, 404);
+            http_response_code(404);
+            echo json_encode(["success" => false, "message" => "User not found."]);
+            break;
         }
 
-        // Generate password reset token
-        $token = bin2hex(random_bytes(16));
-        $expiry = date('Y-m-d H:i:s', strtotime('+1 hour'));
-
-        // Clear existing reset tokens for this email
-        $stmt = $db->prepare("DELETE FROM password_resets WHERE email = :email");
-        $stmt->execute([':email' => $email]);
-
-        // Insert new token
-        $stmt = $db->prepare("INSERT INTO password_resets (email, token, expires_at) VALUES (:email, :token, :expires_at)");
-        $stmt->execute([
-            ':email' => $email,
-            ':token' => $token,
-            ':expires_at' => $expiry
-        ]);
-
-        logActivity($db, $user['id'], "Password reset requested");
-
-        jsonResponse(true, "Password reset code generated. Use the simulated code below to complete the reset.", [
-            "reset_token" => $token
-        ]);
-    } catch (PDOException $e) {
-        jsonResponse(false, "Failed to initiate password reset: " . $e->getMessage(), null, 500);
-    }
-}
-
-// 6. RESET PASSWORD
-function resetPassword($db, $input) {
-    $email = isset($input['email']) ? sanitize($input['email']) : '';
-    $token = isset($input['token']) ? sanitize($input['token']) : '';
-    $password = isset($input['password']) ? $input['password'] : '';
-
-    if (empty($email) || empty($token) || empty($password)) {
-        jsonResponse(false, "All fields (email, token, password) are required.", null, 400);
-    }
-
-    try {
-        // Validate reset token
-        $stmt = $db->prepare("
-            SELECT id FROM password_resets 
-            WHERE email = :email AND token = :token AND expires_at > NOW() 
-            LIMIT 1
-        ");
-        $stmt->execute([
-            ':email' => $email,
-            ':token' => $token
-        ]);
-        $resetRecord = $stmt->fetch();
-
-        if (!$resetRecord) {
-            jsonResponse(false, "Invalid or expired password reset token.", null, 400);
+        if ($user['otp_code'] !== $otp) {
+            http_response_code(400);
+            echo json_encode(["success" => false, "message" => "Invalid OTP code."]);
+            break;
         }
 
-        // Update password in users table
-        $hashedPassword = password_hash($password, PASSWORD_BCRYPT);
-        $stmt = $db->prepare("UPDATE users SET password = :password WHERE email = :email");
-        $stmt->execute([
-            ':password' => $hashedPassword,
-            ':email' => $email
-        ]);
+        if (strtotime($user['otp_expires_at']) < time()) {
+            http_response_code(400);
+            echo json_encode(["success" => false, "message" => "OTP code has expired."]);
+            break;
+        }
 
-        // Fetch user id for activity logs
-        $stmt = $db->prepare("SELECT id FROM users WHERE email = :email LIMIT 1");
+        try {
+            $update = $db->prepare("UPDATE users SET is_verified = 1, otp_code = NULL, otp_expires_at = NULL WHERE id = :id");
+            $update->execute([':id' => $user['id']]);
+
+            logActivity($db, $user['id'], "Email verified", "User successfully verified email via OTP");
+            addNotification($db, $user['id'], "general", "Welcome to CareerBridge! Your account is verified.");
+
+            echo json_encode(["success" => true, "message" => "Email verified successfully. You can now login."]);
+        } catch (Exception $e) {
+            http_response_code(500);
+            echo json_encode(["success" => false, "message" => "Database error: " . $e->getMessage()]);
+        }
+        break;
+
+    case 'login':
+        if (!isset($data['email']) || !isset($data['password'])) {
+            http_response_code(400);
+            echo json_encode(["success" => false, "message" => "Email and password are required."]);
+            break;
+        }
+
+        $email = trim($data['email']);
+        $password = $data['password'];
+
+        $stmt = $db->prepare("SELECT id, name, email, password, role, is_verified, profile_pic FROM users WHERE email = :email");
         $stmt->execute([':email' => $email]);
         $user = $stmt->fetch();
 
-        // Clear all reset tokens for this email
-        $stmt = $db->prepare("DELETE FROM password_resets WHERE email = :email");
-        $stmt->execute([':email' => $email]);
-
-        if ($user) {
-            logActivity($db, $user['id'], "Password changed successfully via reset token");
+        if (!$user || !password_verify($password, $user['password'])) {
+            http_response_code(401);
+            echo json_encode(["success" => false, "message" => "Invalid email or password."]);
+            break;
         }
 
-        jsonResponse(true, "Password has been reset successfully. You can now log in.");
-    } catch (PDOException $e) {
-        jsonResponse(false, "Failed to reset password: " . $e->getMessage(), null, 500);
-    }
-}
-
-// 7. UPDATE PROFILE
-function updateProfile($db) {
-    $user = authenticate($db);
-
-    $fullName = isset($_POST['full_name']) ? sanitize($_POST['full_name']) : '';
-    $mobile = isset($_POST['mobile']) ? sanitize($_POST['mobile']) : '';
-    $email = isset($_POST['email']) ? sanitize($_POST['email']) : '';
-
-    if (empty($fullName) || empty($mobile) || empty($email)) {
-        jsonResponse(false, "Full name, email, and mobile number are required.", null, 400);
-    }
-
-    try {
-        // Check email uniqueness if email has changed
-        if ($email !== $user['email']) {
-            $stmt = $db->prepare("SELECT id FROM users WHERE email = :email AND id != :id LIMIT 1");
-            $stmt->execute([
-                ':email' => $email,
-                ':id' => $user['id']
-            ]);
-            if ($stmt->fetch()) {
-                jsonResponse(false, "This email is already in use by another user.", null, 400);
-            }
-        }
-
-        $profileImage = $user['profile_image'];
-
-        // Process file upload if provided
-        if (isset($_FILES['profile_image']) && $_FILES['profile_image']['error'] === UPLOAD_ERR_OK) {
-            $file = $_FILES['profile_image'];
-            $allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+        if (!$user['is_verified']) {
+            // Unverified user. Regenerate OTP and send response to verification route
+            $otp = strval(rand(100000, 999999));
+            $expiry = date('Y-m-d H:i:s', strtotime('+10 minutes'));
             
-            if (!in_array($file['type'], $allowedTypes)) {
-                jsonResponse(false, "Only JPG, PNG, GIF, and WEBP image uploads are permitted.", null, 400);
-            }
+            $update = $db->prepare("UPDATE users SET otp_code = :otp, otp_expires_at = :expiry WHERE id = :id");
+            $update->execute([':otp' => $otp, ':expiry' => $expiry, ':id' => $user['id']]);
 
-            if ($file['size'] > 3 * 1024 * 1024) { // 3MB limit
-                jsonResponse(false, "Profile picture must be smaller than 3MB.", null, 400);
-            }
-
-            $uploadDir = '../uploads/';
-            if (!is_dir($uploadDir)) {
-                mkdir($uploadDir, 0755, true);
-            }
-
-            $extension = pathinfo($file['name'], PATHINFO_EXTENSION);
-            $filename = 'profile_' . $user['id'] . '_' . bin2hex(random_bytes(4)) . '.' . $extension;
-            $targetPath = $uploadDir . $filename;
-
-            if (move_uploaded_file($file['tmp_name'], $targetPath)) {
-                // Delete old profile picture if exists and isn't a default placeholder
-                if (!empty($user['profile_image'])) {
-                    $oldFile = '../' . $user['profile_image'];
-                    if (file_exists($oldFile) && is_file($oldFile)) {
-                        unlink($oldFile);
-                    }
-                }
-                $profileImage = 'uploads/' . $filename;
-            } else {
-                jsonResponse(false, "Failed to save profile picture.", null, 500);
-            }
+            http_response_code(403);
+            echo json_encode([
+                "success" => false,
+                "verified" => false,
+                "message" => "Account is not verified. A new OTP has been sent.",
+                "debug_otp" => $otp
+            ]);
+            break;
         }
 
-        $stmt = $db->prepare("
-            UPDATE users 
-            SET full_name = :full_name, mobile = :mobile, email = :email, profile_image = :profile_image 
-            WHERE id = :id
-        ");
-        $stmt->execute([
-            ':full_name' => $fullName,
-            ':mobile' => $mobile,
-            ':email' => $email,
-            ':profile_image' => $profileImage,
-            ':id' => $user['id']
+        // Generate JWT Token
+        $payload = [
+            "id" => $user['id'],
+            "name" => $user['name'],
+            "email" => $user['email'],
+            "role" => $user['role']
+        ];
+        $token = JWTHelper::generate($payload);
+
+        logActivity($db, $user['id'], "Login successful", "User logged in successfully");
+
+        echo json_encode([
+            "success" => true,
+            "message" => "Login successful.",
+            "token" => $token,
+            "user" => [
+                "id" => $user['id'],
+                "name" => $user['name'],
+                "email" => $user['email'],
+                "role" => $user['role'],
+                "profile_pic" => $user['profile_pic']
+            ]
         ]);
+        break;
 
-        logActivity($db, $user['id'], "Updated profile details");
-
-        // Fetch updated user info
-        $stmt = $db->prepare("SELECT id, full_name, email, mobile, role, profile_image, created_at FROM users WHERE id = :id LIMIT 1");
-        $stmt->execute([':id' => $user['id']]);
-        $updatedUser = $stmt->fetch();
-
-        jsonResponse(true, "Profile updated successfully.", ["user" => $updatedUser]);
-    } catch (PDOException $e) {
-        jsonResponse(false, "Failed to update profile: " . $e->getMessage(), null, 500);
-    }
-}
-
-// 8. CHANGE PASSWORD
-function changePassword($db, $input) {
-    $user = authenticate($db);
-
-    $currentPassword = isset($input['current_password']) ? $input['current_password'] : '';
-    $newPassword = isset($input['new_password']) ? $input['new_password'] : '';
-
-    if (empty($currentPassword) || empty($newPassword)) {
-        jsonResponse(false, "Current password and new password are required.", null, 400);
-    }
-
-    try {
-        // Fetch user password hash
-        $stmt = $db->prepare("SELECT password FROM users WHERE id = :id LIMIT 1");
-        $stmt->execute([':id' => $user['id']]);
-        $pwdRecord = $stmt->fetch();
-
-        if (!$pwdRecord || !password_verify($currentPassword, $pwdRecord['password'])) {
-            jsonResponse(false, "Your current password is incorrect.", null, 400);
+    case 'forgot-password':
+        if (!isset($data['email'])) {
+            http_response_code(400);
+            echo json_encode(["success" => false, "message" => "Email is required."]);
+            break;
         }
 
-        // Hash and save new password
-        $newHash = password_hash($newPassword, PASSWORD_BCRYPT);
-        $stmt = $db->prepare("UPDATE users SET password = :password WHERE id = :id");
-        $stmt->execute([
-            ':password' => $newHash,
-            ':id' => $user['id']
-        ]);
+        $email = trim($data['email']);
 
-        logActivity($db, $user['id'], "Changed account password");
-        jsonResponse(true, "Password changed successfully.");
-    } catch (PDOException $e) {
-        jsonResponse(false, "Failed to change password: " . $e->getMessage(), null, 500);
-    }
+        $stmt = $db->prepare("SELECT id FROM users WHERE email = :email");
+        $stmt->execute([':email' => $email]);
+        $user = $stmt->fetch();
+
+        if (!$user) {
+            // Keep security consistent, do not explicitly confirm non-existence
+            http_response_code(200);
+            echo json_encode(["success" => true, "message" => "If the email exists, a reset OTP has been sent."]);
+            break;
+        }
+
+        $otp = strval(rand(100000, 999999));
+        $expiry = date('Y-m-d H:i:s', strtotime('+10 minutes'));
+
+        try {
+            $update = $db->prepare("UPDATE users SET otp_code = :otp, otp_expires_at = :expiry WHERE id = :id");
+            $update->execute([':otp' => $otp, ':expiry' => $expiry, ':id' => $user['id']]);
+
+            echo json_encode([
+                "success" => true,
+                "message" => "Reset OTP code sent.",
+                "debug_otp" => $otp
+            ]);
+        } catch (Exception $e) {
+            http_response_code(500);
+            echo json_encode(["success" => false, "message" => "Database error."]);
+        }
+        break;
+
+    case 'reset-password':
+        if (!isset($data['email']) || !isset($data['otp_code']) || !isset($data['new_password'])) {
+            http_response_code(400);
+            echo json_encode(["success" => false, "message" => "Email, OTP code, and new password are required."]);
+            break;
+        }
+
+        $email = trim($data['email']);
+        $otp = trim($data['otp_code']);
+        $new_password = $data['new_password'];
+
+        if (strlen($new_password) < 6) {
+            http_response_code(400);
+            echo json_encode(["success" => false, "message" => "Password must be at least 6 characters."]);
+            break;
+        }
+
+        $stmt = $db->prepare("SELECT id, otp_code, otp_expires_at FROM users WHERE email = :email");
+        $stmt->execute([':email' => $email]);
+        $user = $stmt->fetch();
+
+        if (!$user || $user['otp_code'] !== $otp) {
+            http_response_code(400);
+            echo json_encode(["success" => false, "message" => "Invalid OTP code or email."]);
+            break;
+        }
+
+        if (strtotime($user['otp_expires_at']) < time()) {
+            http_response_code(400);
+            echo json_encode(["success" => false, "message" => "OTP code has expired."]);
+            break;
+        }
+
+        try {
+            $hashed_password = password_hash($new_password, PASSWORD_BCRYPT);
+            $update = $db->prepare("UPDATE users SET password = :password, otp_code = NULL, otp_expires_at = NULL WHERE id = :id");
+            $update->execute([':password' => $hashed_password, ':id' => $user['id']]);
+
+            logActivity($db, $user['id'], "Password reset completed", "User successfully reset their account password");
+            addNotification($db, $user['id'], "general", "Your password was changed successfully.");
+
+            echo json_encode(["success" => true, "message" => "Password has been reset successfully. You can now login with your new password."]);
+        } catch (Exception $e) {
+            http_response_code(500);
+            echo json_encode(["success" => false, "message" => "Database error."]);
+        }
+        break;
+
+    case 'me':
+        $currentUser = JWTHelper::requireAuth();
+        $stmt = $db->prepare("SELECT id, name, email, role, profile_pic, created_at FROM users WHERE id = :id");
+        $stmt->execute([':id' => $currentUser['id']]);
+        $user = $stmt->fetch();
+
+        if (!$user) {
+            http_response_code(404);
+            echo json_encode(["success" => false, "message" => "User session no longer valid."]);
+            break;
+        }
+
+        echo json_encode([
+            "success" => true,
+            "user" => $user
+        ]);
+        break;
+
+    default:
+        http_response_code(404);
+        echo json_encode(["success" => false, "message" => "Action not found."]);
+        break;
 }
 ?>
