@@ -5,7 +5,6 @@ CareerBridge is a centralized, industry-grade Capstone Project designed to strea
 ---
 
 ## Technical Stack
-
 ### Frontend Client
 * **React.js (Vite)**: Modern SPA architecture
 * **Bootstrap 5 & Icons**: Glassmorphism SaaS Dashboard layouts
